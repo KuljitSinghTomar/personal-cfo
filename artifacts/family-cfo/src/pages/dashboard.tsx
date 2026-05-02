@@ -26,15 +26,36 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from "recharts";
-import { TrendingUp, TrendingDown, ArrowRight, RefreshCw, AlertTriangle, Lightbulb, Info, CheckCircle } from "lucide-react";
+import { TrendingUp, TrendingDown, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Link } from "wouter";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 
 const CHART_COLORS = ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(amount);
+}
+
+function getLast18Months() {
+  const months: { value: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 18; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = d.toISOString().substring(0, 7);
+    const label = d.toLocaleString("en-AU", { month: "long", year: "numeric" });
+    months.push({ value, label });
+  }
+  return months;
+}
+
+function getMonthDateRange(month: string) {
+  const [year, m] = month.split("-").map(Number);
+  const start = `${month}-01`;
+  const lastDay = new Date(year!, m!, 0).getDate();
+  const end = `${month}-${String(lastDay).padStart(2, "0")}`;
+  return { startDate: start, endDate: end };
 }
 
 function MetricCard({ label, value, sub, positive }: { label: string; value: string; sub?: string; positive?: boolean }) {
@@ -55,17 +76,25 @@ function InsightIcon({ type }: { type: string }) {
   return <Lightbulb className="w-4 h-4 text-primary flex-shrink-0" />;
 }
 
-export default function Dashboard() {
-  const [cashflowMonths] = useState(12);
+const MONTH_OPTIONS = getLast18Months();
+const ALL_TIME = "__all__";
 
-  const summary = useGetDashboardSummary(undefined, {
-    query: { queryKey: getGetDashboardSummaryQueryKey() },
+export default function Dashboard() {
+  const [selectedMonth, setSelectedMonth] = useState<string>(ALL_TIME);
+
+  const isMonthly = selectedMonth !== ALL_TIME;
+  const dateRange = isMonthly ? getMonthDateRange(selectedMonth) : undefined;
+  const summaryParams = dateRange ?? {};
+
+  const summary = useGetDashboardSummary(summaryParams, {
+    query: { queryKey: getGetDashboardSummaryQueryKey(summaryParams) },
   });
-  const cashflow = useGetCashflow({ months: cashflowMonths }, {
-    query: { queryKey: getGetCashflowQueryKey({ months: cashflowMonths }) },
+  const cashflow = useGetCashflow({ months: 12 }, {
+    query: { queryKey: getGetCashflowQueryKey({ months: 12 }) },
   });
-  const categories = useGetSpendingByCategory(undefined, {
-    query: { queryKey: getGetSpendingByCategoryQueryKey() },
+  const catParams = dateRange ?? {};
+  const categories = useGetSpendingByCategory(catParams, {
+    query: { queryKey: getGetSpendingByCategoryQueryKey(catParams) },
   });
   const accounts = useGetAccounts({ query: { queryKey: getGetAccountsQueryKey() } });
   const forecast = useGetForecast({ query: { queryKey: getGetForecastQueryKey() } });
@@ -77,8 +106,24 @@ export default function Dashboard() {
   const s = summary.data;
   const f = forecast.data;
 
+  // Navigate months
+  const currentMonthIdx = MONTH_OPTIONS.findIndex((m) => m.value === selectedMonth);
+  const canGoBack = currentMonthIdx < MONTH_OPTIONS.length - 1;
+  const canGoForward = isMonthly && currentMonthIdx > 0;
+
+  function stepMonth(dir: 1 | -1) {
+    if (selectedMonth === ALL_TIME) {
+      setSelectedMonth(MONTH_OPTIONS[0]!.value);
+      return;
+    }
+    const next = MONTH_OPTIONS[currentMonthIdx - dir];
+    if (next) setSelectedMonth(next.value);
+    else setSelectedMonth(ALL_TIME);
+  }
+
   const cashflowData = (cashflow.data?.months ?? []).map((m) => ({
     month: m.month.substring(5),
+    fullMonth: m.month,
     Income: m.income,
     Expenses: m.expenses,
     Savings: m.savings,
@@ -90,21 +135,55 @@ export default function Dashboard() {
     color: CHART_COLORS[i % CHART_COLORS.length],
   }));
 
+  const selectedLabel = isMonthly
+    ? MONTH_OPTIONS.find((m) => m.value === selectedMonth)?.label ?? selectedMonth
+    : "Last 12 months";
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground">Command Centre</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{s?.periodLabel ?? "Loading..."}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{isMonthly ? selectedLabel : (s?.periodLabel ?? "Loading...")}</p>
         </div>
-        {f && (
-          <div className="text-right bg-card border border-card-border rounded-lg px-4 py-2">
-            <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
-            <p className="text-sm font-semibold text-foreground">{f.onTrackMessage}</p>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Month navigator */}
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => stepMonth(-1)} disabled={!canGoBack} title="Previous month">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="h-8 w-44 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_TIME}>Last 12 months</SelectItem>
+              {MONTH_OPTIONS.map((m) => (
+                <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => stepMonth(1)} disabled={!canGoForward} title="Next month">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+
+          {/* Forecast pill — only for current/all-time view */}
+          {!isMonthly && f && (
+            <div className="text-right bg-card border border-card-border rounded-lg px-4 py-2 hidden lg:block">
+              <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
+              <p className="text-sm font-semibold text-foreground">{f.onTrackMessage}</p>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Forecast bar for mobile / monthly view */}
+      {!isMonthly && f && (
+        <div className="bg-card border border-card-border rounded-lg px-4 py-2 lg:hidden">
+          <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
+          <p className="text-sm font-semibold text-foreground">{f.onTrackMessage}</p>
+        </div>
+      )}
 
       {/* KPI Row */}
       {summary.isLoading ? (
@@ -129,10 +208,10 @@ export default function Dashboard() {
 
       {/* Cashflow Chart + AI Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Cashflow Chart */}
+        {/* Cashflow Chart — always 12-month rolling for context */}
         <div className="lg:col-span-2 bg-card border border-card-border rounded-lg p-4" data-testid="cashflow-chart">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cash Flow — Last {cashflowMonths} Months</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cash Flow — Last 12 Months</h2>
             {cashflow.data && (
               <div className="flex gap-4 text-xs text-muted-foreground">
                 <span>Avg Income <span className="text-emerald-400 font-semibold">{formatCurrency(cashflow.data.averageIncome)}</span></span>
@@ -150,16 +229,29 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={cashflowData} barGap={2} barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <XAxis
+                  dataKey="month"
+                  tick={(props) => {
+                    const { x, y, payload } = props;
+                    const isSelected = isMonthly && cashflowData.find((d) => d.month === payload.value)?.fullMonth === selectedMonth;
+                    return (
+                      <text x={x} y={y + 12} textAnchor="middle" fontSize={11} fill={isSelected ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))"} fontWeight={isSelected ? "bold" : "normal"}>
+                        {payload.value}
+                      </text>
+                    );
+                  }}
+                  axisLine={false}
+                  tickLine={false}
+                />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
                 <Tooltip
                   contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 12 }}
                   labelStyle={{ color: "hsl(var(--foreground))" }}
                   formatter={(v: number) => formatCurrency(v)}
                 />
-                <Bar dataKey="Income" fill="#10b981" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Expenses" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Income" fill="#10b981" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
+                <Bar dataKey="Expenses" fill="#ef4444" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
+                <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -199,7 +291,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Spending by Category */}
         <div className="bg-card border border-card-border rounded-lg p-4" data-testid="spending-categories">
-          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-4">Spending by Category</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+            Spending by Category{isMonthly ? ` — ${selectedLabel}` : ""}
+          </h2>
           {categories.isLoading ? (
             <div className="h-48 animate-pulse bg-muted rounded" />
           ) : pieData.length === 0 ? (

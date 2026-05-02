@@ -8,11 +8,13 @@ import {
   useAutoGenerateBudgets,
   useGetBudgetStatus,
   getGetBudgetStatusQueryKey,
+  useGetCashflow,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Plus, Trash2, Target, AlertTriangle, CheckCircle,
   TrendingUp, Sparkles, Pencil, X, Check, RefreshCw, Info,
+  ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +23,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
-const CATEGORIES = [
+const PRESET_CATEGORIES = [
   "Groceries", "Dining", "Transport", "Utilities", "Entertainment",
   "Health", "Shopping", "General Merchandise", "Personal Care",
   "Education", "Travel", "Subscriptions", "Other",
@@ -31,6 +34,20 @@ const CATEGORIES = [
 function formatCurrency(v: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(v);
 }
+
+function getLast13Months() {
+  const months: { value: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 13; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = d.toISOString().substring(0, 7);
+    const label = d.toLocaleString("en-AU", { month: "long", year: "numeric" });
+    months.push({ value, label });
+  }
+  return months;
+}
+
+const MONTH_OPTIONS = getLast13Months();
 
 function ProgressBar({ percent, isOver }: { percent: number; isOver: boolean }) {
   const clamped = Math.min(percent, 100);
@@ -67,14 +84,14 @@ function SourceBadge({ source, userEdited }: { source: string; userEdited: boole
 interface InlineEditProps {
   goalId: string;
   current: number;
+  selectedMonth: string;
   onDone: () => void;
 }
-function InlineEdit({ goalId, current, onDone }: InlineEditProps) {
+function InlineEdit({ goalId, current, selectedMonth, onDone }: InlineEditProps) {
   const [value, setValue] = useState(String(Math.round(current)));
   const updateMutation = useUpdateBudgetGoal();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const currentMonth = new Date().toISOString().substring(0, 7);
 
   const save = () => {
     const v = parseFloat(value);
@@ -84,7 +101,7 @@ function InlineEdit({ goalId, current, onDone }: InlineEditProps) {
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListBudgetGoalsQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getGetBudgetStatusQueryKey({ month: currentMonth }) });
+          queryClient.invalidateQueries({ queryKey: getGetBudgetStatusQueryKey({ month: selectedMonth }) });
           toast({ title: "Updated", description: "Monthly limit saved" });
           onDone();
         },
@@ -116,27 +133,39 @@ function InlineEdit({ goalId, current, onDone }: InlineEditProps) {
 export default function Budget() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const currentMonth = new Date().toISOString().substring(0, 7);
 
-  const [newCategory, setNewCategory] = useState(CATEGORIES[0]!);
+  const [selectedMonth, setSelectedMonth] = useState(MONTH_OPTIONS[0]!.value);
+  const [newCategory, setNewCategory] = useState(PRESET_CATEGORIES[0]!);
   const [customCategory, setCustomCategory] = useState("");
   const [useCustom, setUseCustom] = useState(false);
   const [newLimit, setNewLimit] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
+  // Month navigation
+  const monthIdx = MONTH_OPTIONS.findIndex((m) => m.value === selectedMonth);
+  const canGoBack = monthIdx < MONTH_OPTIONS.length - 1;
+  const canGoForward = monthIdx > 0;
+  const selectedLabel = MONTH_OPTIONS[monthIdx]?.label ?? selectedMonth;
+  const isCurrentMonth = monthIdx === 0;
+
   const goals = useListBudgetGoals({ query: { queryKey: getListBudgetGoalsQueryKey() } });
   const status = useGetBudgetStatus(
-    { month: currentMonth },
-    { query: { queryKey: getGetBudgetStatusQueryKey({ month: currentMonth }) } }
+    { month: selectedMonth },
+    { query: { queryKey: getGetBudgetStatusQueryKey({ month: selectedMonth }) } }
   );
+  // Get average monthly income from cashflow (last 12 months)
+  const cashflow = useGetCashflow({ months: 12 }, { query: {} });
+
   const createMutation = useCreateBudgetGoal();
   const deleteMutation = useDeleteBudgetGoal();
   const autoGenMutation = useAutoGenerateBudgets();
 
+  const avgMonthlyIncome = cashflow.data?.averageIncome ?? 0;
+
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: getListBudgetGoalsQueryKey() });
-    queryClient.invalidateQueries({ queryKey: getGetBudgetStatusQueryKey({ month: currentMonth }) });
+    queryClient.invalidateQueries({ queryKey: getGetBudgetStatusQueryKey({ month: selectedMonth }) });
   };
 
   const handleAutoGenerate = () => {
@@ -182,10 +211,14 @@ export default function Budget() {
   };
 
   const s = status.data;
-  const overBudgetCount = (s?.statuses ?? []).filter((s) => s.isOverBudget).length;
+  const overBudgetCount = (s?.statuses ?? []).filter((st) => st.isOverBudget).length;
   const goalCount = goals.data?.goals.length ?? 0;
 
-  // Build display list merging goals with status data
+  const totalBudgeted = s?.totalBudgeted ?? 0;
+  const totalSpent = s?.totalSpent ?? 0;
+  const budgetVsIncome = avgMonthlyIncome > 0 ? (totalBudgeted / avgMonthlyIncome) * 100 : 0;
+  const isOverIncome = avgMonthlyIncome > 0 && totalBudgeted > avgMonthlyIncome;
+
   const displayItems = (s?.statuses ?? []).length > 0
     ? s!.statuses
     : (goals.data?.goals ?? []).map((g) => ({
@@ -210,22 +243,39 @@ export default function Budget() {
         <div>
           <h1 className="text-xl font-bold tracking-tight">Budget Goals</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Auto-generated from your 12-month history · adjust any limit anytime
+            {isCurrentMonth ? "Current month" : selectedLabel} · adjust any limit anytime
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Month navigator */}
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth(MONTH_OPTIONS[monthIdx + 1]!.value)} disabled={!canGoBack} title="Previous month">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+            <SelectTrigger className="h-8 w-44 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTH_OPTIONS.map((m, i) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {i === 0 ? `${m.label} (current)` : m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth(MONTH_OPTIONS[monthIdx - 1]!.value)} disabled={!canGoForward} title="Next month">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
             onClick={handleAutoGenerate}
             disabled={autoGenMutation.isPending}
             className="flex items-center gap-1.5"
-            data-testid="button-auto-generate"
           >
-            {autoGenMutation.isPending
-              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              : <Sparkles className="w-3.5 h-3.5" />}
-            Regenerate from history
+            {autoGenMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            Regenerate
           </Button>
           <Button
             size="sm"
@@ -239,7 +289,7 @@ export default function Budget() {
         </div>
       </div>
 
-      {/* Add goal form (collapsible) */}
+      {/* Add goal form */}
       {showAddForm && (
         <div className="bg-card border border-card-border rounded-lg p-5 space-y-4">
           <h2 className="text-sm font-semibold flex items-center gap-2">
@@ -256,7 +306,7 @@ export default function Budget() {
                 ? <Input value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} placeholder="e.g. Coffee shops" className="h-8 text-sm" />
                 : <Select value={newCategory} onValueChange={setNewCategory}>
                     <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                    <SelectContent>{PRESET_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                   </Select>
               }
             </div>
@@ -273,29 +323,90 @@ export default function Budget() {
       )}
 
       {/* Summary strip */}
-      {s && goalCount > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-card border border-card-border rounded-lg p-3">
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Total Budgeted</p>
-            <p className="text-lg font-bold tabular-nums mt-0.5">{formatCurrency(s.totalBudgeted)}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{goalCount} categories</p>
-          </div>
-          <div className="bg-card border border-card-border rounded-lg p-3">
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Spent This Month</p>
-            <p className={`text-lg font-bold tabular-nums mt-0.5 ${s.totalSpent > s.totalBudgeted ? "text-red-400" : ""}`}>
-              {formatCurrency(s.totalSpent)}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(s.totalBudgeted - s.totalSpent)} remaining</p>
-          </div>
-          <div className="bg-card border border-card-border rounded-lg p-3">
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Status</p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              {overBudgetCount > 0
-                ? <AlertTriangle className="w-4 h-4 text-red-400" />
-                : <CheckCircle className="w-4 h-4 text-emerald-400" />}
-              <p className="text-lg font-bold">{overBudgetCount > 0 ? `${overBudgetCount} over` : "On track"}</p>
+      {goalCount > 0 && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="bg-card border border-card-border rounded-lg p-3">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Total Budgeted</p>
+              <p className={cn("text-lg font-bold tabular-nums mt-0.5", isOverIncome ? "text-red-400" : "")}>{formatCurrency(totalBudgeted)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{goalCount} categories</p>
+            </div>
+            <div className="bg-card border border-card-border rounded-lg p-3">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Spent in {isCurrentMonth ? "Current Month" : selectedLabel.split(" ")[0]}</p>
+              <p className={cn("text-lg font-bold tabular-nums mt-0.5", totalSpent > totalBudgeted ? "text-red-400" : "")}>
+                {formatCurrency(totalSpent)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(totalBudgeted - totalSpent)} remaining</p>
+            </div>
+            <div className="bg-card border border-card-border rounded-lg p-3">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Avg Monthly Income</p>
+              <p className="text-lg font-bold tabular-nums mt-0.5 text-emerald-400">{avgMonthlyIncome > 0 ? formatCurrency(avgMonthlyIncome) : "—"}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">12-month average</p>
+            </div>
+            <div className="bg-card border border-card-border rounded-lg p-3">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Budget vs Income</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                {isOverIncome
+                  ? <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                  : <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
+                <p className={cn("text-lg font-bold", isOverIncome ? "text-red-400" : "text-emerald-400")}>
+                  {avgMonthlyIncome > 0 ? `${budgetVsIncome.toFixed(0)}%` : "—"}
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {isOverIncome ? `${formatCurrency(totalBudgeted - avgMonthlyIncome)} over income` : `${formatCurrency(avgMonthlyIncome - totalBudgeted)} headroom`}
+              </p>
             </div>
           </div>
+
+          {/* Budget health bar */}
+          {avgMonthlyIncome > 0 && (
+            <div className="bg-card border border-card-border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Budget health</span>
+                {isOverIncome && (
+                  <span className="text-xs text-red-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Total budget exceeds average monthly income — some goals may need adjusting
+                  </span>
+                )}
+                {!isOverIncome && overBudgetCount === 0 && (
+                  <span className="text-xs text-emerald-400 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    On track
+                  </span>
+                )}
+                {!isOverIncome && overBudgetCount > 0 && (
+                  <span className="text-xs text-amber-400 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    {overBudgetCount} {overBudgetCount === 1 ? "category" : "categories"} over budget this month
+                  </span>
+                )}
+              </div>
+              <div className="relative h-3 bg-muted rounded-full overflow-hidden">
+                {/* Spent bar */}
+                <div
+                  className={cn("absolute left-0 top-0 h-full rounded-full transition-all duration-700",
+                    totalSpent > avgMonthlyIncome ? "bg-red-500" : totalSpent > totalBudgeted ? "bg-amber-500" : "bg-emerald-500"
+                  )}
+                  style={{ width: `${Math.min((totalSpent / avgMonthlyIncome) * 100, 100)}%` }}
+                />
+                {/* Budget limit marker */}
+                {totalBudgeted < avgMonthlyIncome && (
+                  <div
+                    className="absolute top-0 h-full w-0.5 bg-white/40"
+                    style={{ left: `${(totalBudgeted / avgMonthlyIncome) * 100}%` }}
+                    title={`Budget limit: ${formatCurrency(totalBudgeted)}`}
+                  />
+                )}
+              </div>
+              <div className="flex justify-between text-xs text-muted-foreground mt-1.5">
+                <span>$0</span>
+                {!isOverIncome && <span className="text-white/40">Budget limit {formatCurrency(totalBudgeted)}</span>}
+                <span>{formatCurrency(avgMonthlyIncome)} income</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -326,10 +437,8 @@ export default function Budget() {
               <div
                 key={item.goalId}
                 className={`bg-card border rounded-lg p-4 transition-colors ${item.isOverBudget ? "border-red-500/30" : "border-card-border"}`}
-                data-testid={`budget-card-${item.category}`}
               >
                 <div className="flex items-start justify-between gap-4 mb-2">
-                  {/* Left: category + badges */}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold text-foreground">{item.category}</span>
@@ -342,7 +451,6 @@ export default function Budget() {
                       )}
                     </div>
 
-                    {/* Spend line */}
                     <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
                       <span>
                         <span className={`font-semibold tabular-nums ${item.isOverBudget ? "text-red-400" : "text-foreground"}`}>
@@ -351,7 +459,7 @@ export default function Budget() {
                       </span>
                       <span>of limit</span>
                       {isEditing
-                        ? <InlineEdit goalId={item.goalId} current={item.monthlyLimit} onDone={() => setEditingId(null)} />
+                        ? <InlineEdit goalId={item.goalId} current={item.monthlyLimit} selectedMonth={selectedMonth} onDone={() => setEditingId(null)} />
                         : (
                           <button
                             onClick={() => setEditingId(item.goalId)}
@@ -376,7 +484,6 @@ export default function Budget() {
                     </div>
                   </div>
 
-                  {/* Right: percent + actions */}
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <span className={`text-sm font-bold tabular-nums w-10 text-right ${item.isOverBudget ? "text-red-400" : item.percentUsed > 80 ? "text-amber-400" : "text-emerald-400"}`}>
                       {item.percentUsed.toFixed(0)}%
@@ -384,15 +491,12 @@ export default function Budget() {
                     <button
                       onClick={() => setEditingId(isEditing ? null : item.goalId)}
                       className="p-1.5 rounded border border-border text-muted-foreground hover:text-primary hover:border-primary/40 transition-colors"
-                      title="Edit limit"
                     >
                       <Pencil className="w-3 h-3" />
                     </button>
                     <button
                       onClick={() => handleDelete(item.goalId, item.category)}
                       className="p-1.5 rounded border border-border text-muted-foreground hover:text-red-400 hover:border-red-400/30 transition-colors"
-                      title="Remove goal"
-                      data-testid={`button-delete-goal-${item.goalId}`}
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -406,11 +510,10 @@ export default function Budget() {
         </div>
       )}
 
-      {/* Auto-generated info note */}
       {goalCount > 0 && (
         <p className="text-xs text-muted-foreground flex items-center gap-1.5">
           <Sparkles className="w-3 h-3 text-primary" />
-          Auto limits = 12-month average + 10% buffer, rounded to nearest $10. Click any limit to edit it — edited goals are never overwritten by auto-generate.
+          Auto limits = 12-month average + 10% buffer, rounded to nearest $10. Click any limit to edit it — edited goals are never overwritten.
         </p>
       )}
     </div>
