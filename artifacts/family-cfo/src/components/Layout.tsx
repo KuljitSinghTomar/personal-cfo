@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ReceiptText, Bot, LineChart } from "lucide-react";
+import { LayoutDashboard, ReceiptText, Bot, LineChart, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -8,6 +8,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const navItems = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/transactions", label: "Transactions", icon: ReceiptText },
+    { href: "/budget", label: "Budget Goals", icon: Target },
     { href: "/scenarios", label: "Scenarios", icon: LineChart },
     { href: "/ai-advisor", label: "AI Advisor", icon: Bot },
   ];

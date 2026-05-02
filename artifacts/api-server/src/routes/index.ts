@@ -4,6 +4,7 @@ import transactionsRouter from "./transactions";
 import dashboardRouter from "./dashboard";
 import aiRouter from "./ai";
 import scenariosRouter from "./scenarios";
+import budgetRouter from "./budget";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(transactionsRouter);
 router.use(dashboardRouter);
 router.use(aiRouter);
 router.use(scenariosRouter);
+router.use(budgetRouter);
 
 export default router;

@@ -222,6 +222,40 @@ export interface ScenarioResult {
   monthlyProjection: ProjectionMonth[];
 }
 
+export interface BudgetGoal {
+  id: string;
+  category: string;
+  monthlyLimit: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BudgetGoalBody {
+  category: string;
+  monthlyLimit: number;
+}
+
+export interface BudgetGoalsResponse {
+  goals: BudgetGoal[];
+}
+
+export interface BudgetStatus {
+  category: string;
+  monthlyLimit: number;
+  spent: number;
+  remaining: number;
+  percentUsed: number;
+  isOverBudget: boolean;
+  goalId: string;
+}
+
+export interface BudgetStatusResponse {
+  month: string;
+  statuses: BudgetStatus[];
+  totalBudgeted: number;
+  totalSpent: number;
+}
+
 export type ListTransactionsParams = {
   page?: number;
   limit?: number;
@@ -255,4 +289,15 @@ export type GetCashflowParams = {
 export type GetSpendingByCategoryParams = {
   startDate?: string;
   endDate?: string;
+};
+
+export type DeleteBudgetGoal200 = {
+  success: boolean;
+};
+
+export type GetBudgetStatusParams = {
+  /**
+   * YYYY-MM format, defaults to current month
+   */
+  month?: string;
 };

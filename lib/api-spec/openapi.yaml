@@ -18,6 +18,8 @@ tags:
     description: AI insights and chat
   - name: scenarios
     description: Financial scenario simulation
+  - name: budget
+    description: Budget goals and spending limits
 
 paths:
   /healthz:
@@ -273,6 +275,79 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ScenarioResult"
+
+  /budget/goals:
+    get:
+      operationId: listBudgetGoals
+      tags: [budget]
+      summary: List all budget goals
+      responses:
+        "200":
+          description: List of budget goals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetGoalsResponse"
+    post:
+      operationId: createBudgetGoal
+      tags: [budget]
+      summary: Create or update a budget goal for a category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BudgetGoalBody"
+      responses:
+        "200":
+          description: Created or updated budget goal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetGoal"
+
+  /budget/goals/{id}:
+    delete:
+      operationId: deleteBudgetGoal
+      tags: [budget]
+      summary: Delete a budget goal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+
+  /budget/status:
+    get:
+      operationId: getBudgetStatus
+      tags: [budget]
+      summary: Get current month budget status (goals vs actuals)
+      parameters:
+        - name: month
+          in: query
+          schema:
+            type: string
+            description: "YYYY-MM format, defaults to current month"
+      responses:
+        "200":
+          description: Budget status for current month
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetStatusResponse"
 
 components:
   schemas:
@@ -747,3 +822,89 @@ components:
         - expenses
         - savings
         - cumulativeSavings
+
+    BudgetGoal:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+        monthlyLimit:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - category
+        - monthlyLimit
+        - createdAt
+        - updatedAt
+
+    BudgetGoalBody:
+      type: object
+      properties:
+        category:
+          type: string
+        monthlyLimit:
+          type: number
+      required:
+        - category
+        - monthlyLimit
+
+    BudgetGoalsResponse:
+      type: object
+      properties:
+        goals:
+          type: array
+          items:
+            $ref: "#/components/schemas/BudgetGoal"
+      required:
+        - goals
+
+    BudgetStatus:
+      type: object
+      properties:
+        category:
+          type: string
+        monthlyLimit:
+          type: number
+        spent:
+          type: number
+        remaining:
+          type: number
+        percentUsed:
+          type: number
+        isOverBudget:
+          type: boolean
+        goalId:
+          type: string
+      required:
+        - category
+        - monthlyLimit
+        - spent
+        - remaining
+        - percentUsed
+        - isOverBudget
+        - goalId
+
+    BudgetStatusResponse:
+      type: object
+      properties:
+        month:
+          type: string
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/BudgetStatus"
+        totalBudgeted:
+          type: number
+        totalSpent:
+          type: number
+      required:
+        - month
+        - statuses
+        - totalBudgeted
+        - totalSpent

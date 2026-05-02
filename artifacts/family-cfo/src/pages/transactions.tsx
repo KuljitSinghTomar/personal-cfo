@@ -78,7 +78,7 @@ export default function Transactions() {
     reader.onload = async (evt) => {
       const csvContent = evt.target?.result as string;
       importMutation.mutate(
-        { csvContent, fileName: file.name },
+        { data: { csvContent } },
         {
           onSuccess: (result) => {
             toast({
@@ -87,8 +87,9 @@ export default function Transactions() {
             });
             queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
           },
-          onError: () => {
-            toast({ title: "Import failed", description: "Could not parse the CSV file.", variant: "destructive" });
+          onError: (err: any) => {
+            const msg = err?.data?.error ?? err?.message ?? "Could not parse the CSV file.";
+            toast({ title: "Import failed", description: msg, variant: "destructive" });
           },
         }
       );

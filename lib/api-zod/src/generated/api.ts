@@ -308,3 +308,69 @@ export const SimulateScenarioResponse = zod.object({
     }),
   ),
 });
+
+/**
+ * @summary List all budget goals
+ */
+export const ListBudgetGoalsResponse = zod.object({
+  goals: zod.array(
+    zod.object({
+      id: zod.string(),
+      category: zod.string(),
+      monthlyLimit: zod.number(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create or update a budget goal for a category
+ */
+export const CreateBudgetGoalBody = zod.object({
+  category: zod.string(),
+  monthlyLimit: zod.number(),
+});
+
+export const CreateBudgetGoalResponse = zod.object({
+  id: zod.string(),
+  category: zod.string(),
+  monthlyLimit: zod.number(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
+ * @summary Delete a budget goal
+ */
+export const DeleteBudgetGoalParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteBudgetGoalResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary Get current month budget status (goals vs actuals)
+ */
+export const GetBudgetStatusQueryParams = zod.object({
+  month: zod.coerce.string().optional(),
+});
+
+export const GetBudgetStatusResponse = zod.object({
+  month: zod.string(),
+  statuses: zod.array(
+    zod.object({
+      category: zod.string(),
+      monthlyLimit: zod.number(),
+      spent: zod.number(),
+      remaining: zod.number(),
+      percentUsed: zod.number(),
+      isOverBudget: zod.boolean(),
+      goalId: zod.string(),
+    }),
+  ),
+  totalBudgeted: zod.number(),
+  totalSpent: zod.number(),
+});

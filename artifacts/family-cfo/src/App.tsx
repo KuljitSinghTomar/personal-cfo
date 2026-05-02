@@ -9,6 +9,7 @@ import Dashboard from "@/pages/dashboard";
 import Transactions from "@/pages/transactions";
 import AiAdvisor from "@/pages/ai-advisor";
 import Scenarios from "@/pages/scenarios";
+import Budget from "@/pages/budget";
 
 const queryClient = new QueryClient();
 
@@ -18,6 +19,7 @@ function Router() {
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/transactions" component={Transactions} />
+        <Route path="/budget" component={Budget} />
         <Route path="/ai-advisor" component={AiAdvisor} />
         <Route path="/scenarios" component={Scenarios} />
         <Route component={NotFound} />

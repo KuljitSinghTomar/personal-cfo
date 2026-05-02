@@ -20,9 +20,15 @@ import type {
   AccountsResponse,
   AiChatBody,
   AiInsightsResponse,
+  BudgetGoal,
+  BudgetGoalBody,
+  BudgetGoalsResponse,
+  BudgetStatusResponse,
   CashflowResponse,
   DashboardSummary,
+  DeleteBudgetGoal200,
   ForecastResponse,
+  GetBudgetStatusParams,
   GetCashflowParams,
   GetDashboardSummaryParams,
   GetSpendingByCategoryParams,
@@ -1088,3 +1094,342 @@ export const useSimulateScenario = <
 > => {
   return useMutation(getSimulateScenarioMutationOptions(options));
 };
+
+/**
+ * @summary List all budget goals
+ */
+export const getListBudgetGoalsUrl = () => {
+  return `/api/budget/goals`;
+};
+
+export const listBudgetGoals = async (
+  options?: RequestInit,
+): Promise<BudgetGoalsResponse> => {
+  return customFetch<BudgetGoalsResponse>(getListBudgetGoalsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListBudgetGoalsQueryKey = () => {
+  return [`/api/budget/goals`] as const;
+};
+
+export const getListBudgetGoalsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBudgetGoals>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listBudgetGoals>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListBudgetGoalsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listBudgetGoals>>> = ({
+    signal,
+  }) => listBudgetGoals({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBudgetGoals>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListBudgetGoalsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBudgetGoals>>
+>;
+export type ListBudgetGoalsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all budget goals
+ */
+
+export function useListBudgetGoals<
+  TData = Awaited<ReturnType<typeof listBudgetGoals>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listBudgetGoals>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListBudgetGoalsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create or update a budget goal for a category
+ */
+export const getCreateBudgetGoalUrl = () => {
+  return `/api/budget/goals`;
+};
+
+export const createBudgetGoal = async (
+  budgetGoalBody: BudgetGoalBody,
+  options?: RequestInit,
+): Promise<BudgetGoal> => {
+  return customFetch<BudgetGoal>(getCreateBudgetGoalUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(budgetGoalBody),
+  });
+};
+
+export const getCreateBudgetGoalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createBudgetGoal>>,
+    TError,
+    { data: BodyType<BudgetGoalBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createBudgetGoal>>,
+  TError,
+  { data: BodyType<BudgetGoalBody> },
+  TContext
+> => {
+  const mutationKey = ["createBudgetGoal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createBudgetGoal>>,
+    { data: BodyType<BudgetGoalBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createBudgetGoal(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateBudgetGoalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createBudgetGoal>>
+>;
+export type CreateBudgetGoalMutationBody = BodyType<BudgetGoalBody>;
+export type CreateBudgetGoalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create or update a budget goal for a category
+ */
+export const useCreateBudgetGoal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createBudgetGoal>>,
+    TError,
+    { data: BodyType<BudgetGoalBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createBudgetGoal>>,
+  TError,
+  { data: BodyType<BudgetGoalBody> },
+  TContext
+> => {
+  return useMutation(getCreateBudgetGoalMutationOptions(options));
+};
+
+/**
+ * @summary Delete a budget goal
+ */
+export const getDeleteBudgetGoalUrl = (id: string) => {
+  return `/api/budget/goals/${id}`;
+};
+
+export const deleteBudgetGoal = async (
+  id: string,
+  options?: RequestInit,
+): Promise<DeleteBudgetGoal200> => {
+  return customFetch<DeleteBudgetGoal200>(getDeleteBudgetGoalUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteBudgetGoalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteBudgetGoal>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteBudgetGoal>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteBudgetGoal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteBudgetGoal>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteBudgetGoal(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteBudgetGoalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteBudgetGoal>>
+>;
+
+export type DeleteBudgetGoalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a budget goal
+ */
+export const useDeleteBudgetGoal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteBudgetGoal>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteBudgetGoal>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteBudgetGoalMutationOptions(options));
+};
+
+/**
+ * @summary Get current month budget status (goals vs actuals)
+ */
+export const getGetBudgetStatusUrl = (params?: GetBudgetStatusParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/budget/status?${stringifiedParams}`
+    : `/api/budget/status`;
+};
+
+export const getBudgetStatus = async (
+  params?: GetBudgetStatusParams,
+  options?: RequestInit,
+): Promise<BudgetStatusResponse> => {
+  return customFetch<BudgetStatusResponse>(getGetBudgetStatusUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBudgetStatusQueryKey = (params?: GetBudgetStatusParams) => {
+  return [`/api/budget/status`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetBudgetStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBudgetStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetBudgetStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBudgetStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetBudgetStatusQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getBudgetStatus>>> = ({
+    signal,
+  }) => getBudgetStatus(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBudgetStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBudgetStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBudgetStatus>>
+>;
+export type GetBudgetStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get current month budget status (goals vs actuals)
+ */
+
+export function useGetBudgetStatus<
+  TData = Awaited<ReturnType<typeof getBudgetStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetBudgetStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBudgetStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBudgetStatusQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
