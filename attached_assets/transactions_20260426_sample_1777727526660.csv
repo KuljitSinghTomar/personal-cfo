@@ -1,0 +1,15 @@
+transaction_id,description,user_description,amount,currency,transaction_date,posted_date,account_number,account_name,credit_debit,transaction_type,provider_name,merchant_name,budget_category,category_name,user_tags,notes,included
+1211564669,POS AUTHORISATION         ALDI STORES              POINT COOK   AU,,-105.01,AUD,2026-04-26,,xxxx xxxx xxxx 2141,ANZ Rewards Travel Adventures Visa,debit,transfer_outgoing,ANZ,Aldi,living,Groceries,"",,true
+1211564672,POS AUTHORISATION         BIG FRESH PRODUCE PTY LTDPOINTCOOK    AU,,-26.95,AUD,2026-04-26,,xxxx xxxx xxxx 2141,ANZ Rewards Travel Adventures Visa,debit,transfer_outgoing,ANZ,Big W,living,General Merchandise,"",,true
+1211564676,POS AUTHORISATION         COLES 0516               POINT COOK   AU,,-6.5,AUD,2026-04-26,,xxxx xxxx xxxx 2141,ANZ Rewards Travel Adventures Visa,debit,transfer_outgoing,ANZ,Coles,living,Groceries,"",,true
+1211569640,PAYMENT FROM PRATEETI TOMAR,,6330.0,AUD,2025-10-08,2025-10-08,xxxxxx xxxxx3207,ANZ Access Advantage,credit,transfer_incoming,ANZ,Unknown,lifestyle,Transfer Between Accounts,"",,true
+1211569645,PAYMENT FROM KULJIT TOMAR,,4740.0,AUD,2025-09-30,2025-09-30,xxxxxx xxxxx3207,ANZ Access Advantage,credit,transfer_incoming,ANZ,Unknown,lifestyle,Transfer Between Accounts,"",,true
+1211569650,ANZ M-BANKING FUNDS TFER                TRANSFER 130393  TO 4564XXXXXXXX2141,,-2696.0,AUD,2025-09-08,2025-09-08,xxxxxx xxxxx3207,ANZ Access Advantage,debit,other,ANZ,Unknown,lifestyle,Credit Card Payments,"",,true
+1211569656,PAYMENT FROM PRATEETI TOMAR,,2696.0,AUD,2025-09-08,2025-09-08,xxxxxx xxxxx3207,ANZ Access Advantage,credit,transfer_incoming,ANZ,Unknown,lifestyle,Transfer Between Accounts,"",,true
+1211569659,ANZ M-BANKING FUNDS TFER                TRANSFER 782515  TO 4564XXXXXXXX2141,,-5117.0,AUD,2025-08-30,2025-09-01,xxxxxx xxxxx3207,ANZ Access Advantage,debit,other,ANZ,Unknown,lifestyle,Credit Card Payments,"",,true
+211583826,INTEREST PAID,,0.01,AUD,2025-10-31,2025-10-31,xxx-xxx xx1250,Westpac Life,credit,interest_paid,Westpac,Unknown,income,Interest Income,"",,true
+1211583829,INTEREST PAID,,0.02,AUD,2025-09-30,2025-09-30,xxx-xxx xx1250,Westpac Life,credit,interest_paid,Westpac,Unknown,income,Interest Income,"",,true
+1211584068,DEPOSIT-OSKO PAYMENT 2227186 KULJIT SINGH TOMAR For pest control,,440.0,AUD,2026-01-21,2026-01-21,xxx-xxx xx6459,Westpac Choice,credit,transfer_incoming,Westpac,Unknown,lifestyle,Transfer Between Accounts,"",,true
+1211584230,WITHDRAWAL-OSKO PAYMENT 1215892 Kuljit Singh Tomar Stake,,-2000.0,AUD,2025-04-28,2025-04-28,xxx-xxx xx6459,Westpac Choice,debit,payment,Westpac,Unknown,lifestyle,Transfer Out,"",,true
+1211584232,DEPOSIT ONLINE 2204704 PYMT Mav3rik Mav3rik Payroll,,9303.14,AUD,2025-04-28,2025-04-28,xxx-xxx xx6459,Westpac Choice,credit,transfer_incoming,Westpac,Unknown,income,Salary/Regular Income,"",,true
+1211616431,Credit Interest,,0.01,AUD,2026-04-01,2026-04-01,xxx-xxx xxxx2210,Commonwealth Direct Investment Account,credit,interest_paid,CommBank,Unknown,income,Interest Income,"",,true
