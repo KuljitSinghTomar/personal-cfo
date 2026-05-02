@@ -10,6 +10,7 @@ import {
   UpdateTransactionParams,
   ImportTransactionsBody,
 } from "@workspace/api-zod";
+import { autoGenerateBudgetGoals } from "./budget";
 
 const router = Router();
 
@@ -151,6 +152,11 @@ router.post("/transactions/import", async (req, res) => {
         errors++;
       }
     }
+
+    // Auto-generate budget goals from updated transaction history (fire-and-forget)
+    autoGenerateBudgetGoals(req.log).catch((e) => {
+      req.log.warn({ err: e }, "Auto-generate budgets failed after import (non-fatal)");
+    });
 
     res.json({
       imported,

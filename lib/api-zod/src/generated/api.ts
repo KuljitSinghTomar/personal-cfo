@@ -318,6 +318,9 @@ export const ListBudgetGoalsResponse = zod.object({
       id: zod.string(),
       category: zod.string(),
       monthlyLimit: zod.number(),
+      source: zod.enum(["auto", "manual"]),
+      avgMonthlySpend: zod.number().nullish(),
+      userEdited: zod.boolean(),
       createdAt: zod.string(),
       updatedAt: zod.string(),
     }),
@@ -336,6 +339,31 @@ export const CreateBudgetGoalResponse = zod.object({
   id: zod.string(),
   category: zod.string(),
   monthlyLimit: zod.number(),
+  source: zod.enum(["auto", "manual"]),
+  avgMonthlySpend: zod.number().nullish(),
+  userEdited: zod.boolean(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
+ * @summary Update a budget goal's monthly limit (marks it as user-edited)
+ */
+export const UpdateBudgetGoalParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateBudgetGoalBody = zod.object({
+  monthlyLimit: zod.number(),
+});
+
+export const UpdateBudgetGoalResponse = zod.object({
+  id: zod.string(),
+  category: zod.string(),
+  monthlyLimit: zod.number(),
+  source: zod.enum(["auto", "manual"]),
+  avgMonthlySpend: zod.number().nullish(),
+  userEdited: zod.boolean(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -349,6 +377,27 @@ export const DeleteBudgetGoalParams = zod.object({
 
 export const DeleteBudgetGoalResponse = zod.object({
   success: zod.boolean(),
+});
+
+/**
+ * @summary Auto-generate budget goals from last 12 months of transaction history
+ */
+export const AutoGenerateBudgetsResponse = zod.object({
+  created: zod.number(),
+  updated: zod.number(),
+  skipped: zod.number(),
+  goals: zod.array(
+    zod.object({
+      id: zod.string(),
+      category: zod.string(),
+      monthlyLimit: zod.number(),
+      source: zod.enum(["auto", "manual"]),
+      avgMonthlySpend: zod.number().nullish(),
+      userEdited: zod.boolean(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+    }),
+  ),
 });
 
 /**

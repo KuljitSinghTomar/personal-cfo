@@ -20,6 +20,7 @@ import type {
   AccountsResponse,
   AiChatBody,
   AiInsightsResponse,
+  AutoGenerateResult,
   BudgetGoal,
   BudgetGoalBody,
   BudgetGoalsResponse,
@@ -41,6 +42,7 @@ import type {
   SpendingByCategoryResponse,
   Transaction,
   TransactionListResponse,
+  UpdateBudgetGoalBody,
   UpdateTransactionBody,
 } from "./api.schemas";
 
@@ -1257,6 +1259,93 @@ export const useCreateBudgetGoal = <
 };
 
 /**
+ * @summary Update a budget goal's monthly limit (marks it as user-edited)
+ */
+export const getUpdateBudgetGoalUrl = (id: string) => {
+  return `/api/budget/goals/${id}`;
+};
+
+export const updateBudgetGoal = async (
+  id: string,
+  updateBudgetGoalBody: UpdateBudgetGoalBody,
+  options?: RequestInit,
+): Promise<BudgetGoal> => {
+  return customFetch<BudgetGoal>(getUpdateBudgetGoalUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateBudgetGoalBody),
+  });
+};
+
+export const getUpdateBudgetGoalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateBudgetGoal>>,
+    TError,
+    { id: string; data: BodyType<UpdateBudgetGoalBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateBudgetGoal>>,
+  TError,
+  { id: string; data: BodyType<UpdateBudgetGoalBody> },
+  TContext
+> => {
+  const mutationKey = ["updateBudgetGoal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateBudgetGoal>>,
+    { id: string; data: BodyType<UpdateBudgetGoalBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateBudgetGoal(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateBudgetGoalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateBudgetGoal>>
+>;
+export type UpdateBudgetGoalMutationBody = BodyType<UpdateBudgetGoalBody>;
+export type UpdateBudgetGoalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a budget goal's monthly limit (marks it as user-edited)
+ */
+export const useUpdateBudgetGoal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateBudgetGoal>>,
+    TError,
+    { id: string; data: BodyType<UpdateBudgetGoalBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateBudgetGoal>>,
+  TError,
+  { id: string; data: BodyType<UpdateBudgetGoalBody> },
+  TContext
+> => {
+  return useMutation(getUpdateBudgetGoalMutationOptions(options));
+};
+
+/**
  * @summary Delete a budget goal
  */
 export const getDeleteBudgetGoalUrl = (id: string) => {
@@ -1338,6 +1427,87 @@ export const useDeleteBudgetGoal = <
   TContext
 > => {
   return useMutation(getDeleteBudgetGoalMutationOptions(options));
+};
+
+/**
+ * @summary Auto-generate budget goals from last 12 months of transaction history
+ */
+export const getAutoGenerateBudgetsUrl = () => {
+  return `/api/budget/auto-generate`;
+};
+
+export const autoGenerateBudgets = async (
+  options?: RequestInit,
+): Promise<AutoGenerateResult> => {
+  return customFetch<AutoGenerateResult>(getAutoGenerateBudgetsUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAutoGenerateBudgetsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof autoGenerateBudgets>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof autoGenerateBudgets>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["autoGenerateBudgets"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof autoGenerateBudgets>>,
+    void
+  > = () => {
+    return autoGenerateBudgets(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AutoGenerateBudgetsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof autoGenerateBudgets>>
+>;
+
+export type AutoGenerateBudgetsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Auto-generate budget goals from last 12 months of transaction history
+ */
+export const useAutoGenerateBudgets = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof autoGenerateBudgets>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof autoGenerateBudgets>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getAutoGenerateBudgetsMutationOptions(options));
 };
 
 /**

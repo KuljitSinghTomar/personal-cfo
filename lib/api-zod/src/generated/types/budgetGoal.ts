@@ -5,11 +5,15 @@
  * Family CFO API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BudgetGoalSource } from "./budgetGoalSource";
 
 export interface BudgetGoal {
   id: string;
   category: string;
   monthlyLimit: number;
+  source: BudgetGoalSource;
+  avgMonthlySpend?: number | null;
+  userEdited: boolean;
   createdAt: string;
   updatedAt: string;
 }

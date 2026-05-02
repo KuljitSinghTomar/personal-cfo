@@ -222,10 +222,21 @@ export interface ScenarioResult {
   monthlyProjection: ProjectionMonth[];
 }
 
+export type BudgetGoalSource =
+  (typeof BudgetGoalSource)[keyof typeof BudgetGoalSource];
+
+export const BudgetGoalSource = {
+  auto: "auto",
+  manual: "manual",
+} as const;
+
 export interface BudgetGoal {
   id: string;
   category: string;
   monthlyLimit: number;
+  source: BudgetGoalSource;
+  avgMonthlySpend?: number | null;
+  userEdited: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -233,6 +244,17 @@ export interface BudgetGoal {
 export interface BudgetGoalBody {
   category: string;
   monthlyLimit: number;
+}
+
+export interface UpdateBudgetGoalBody {
+  monthlyLimit: number;
+}
+
+export interface AutoGenerateResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  goals: BudgetGoal[];
 }
 
 export interface BudgetGoalsResponse {

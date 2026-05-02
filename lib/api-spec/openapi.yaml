@@ -307,6 +307,29 @@ paths:
                 $ref: "#/components/schemas/BudgetGoal"
 
   /budget/goals/{id}:
+    put:
+      operationId: updateBudgetGoal
+      tags: [budget]
+      summary: Update a budget goal's monthly limit (marks it as user-edited)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBudgetGoalBody"
+      responses:
+        "200":
+          description: Updated budget goal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetGoal"
     delete:
       operationId: deleteBudgetGoal
       tags: [budget]
@@ -329,6 +352,19 @@ paths:
                     type: boolean
                 required:
                   - success
+
+  /budget/auto-generate:
+    post:
+      operationId: autoGenerateBudgets
+      tags: [budget]
+      summary: Auto-generate budget goals from last 12 months of transaction history
+      responses:
+        "200":
+          description: Auto-generation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoGenerateResult"
 
   /budget/status:
     get:
@@ -832,6 +868,14 @@ components:
           type: string
         monthlyLimit:
           type: number
+        source:
+          type: string
+          enum: [auto, manual]
+        avgMonthlySpend:
+          type: number
+          nullable: true
+        userEdited:
+          type: boolean
         createdAt:
           type: string
         updatedAt:
@@ -840,6 +884,8 @@ components:
         - id
         - category
         - monthlyLimit
+        - source
+        - userEdited
         - createdAt
         - updatedAt
 
@@ -853,6 +899,33 @@ components:
       required:
         - category
         - monthlyLimit
+
+    UpdateBudgetGoalBody:
+      type: object
+      properties:
+        monthlyLimit:
+          type: number
+      required:
+        - monthlyLimit
+
+    AutoGenerateResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        updated:
+          type: integer
+        skipped:
+          type: integer
+        goals:
+          type: array
+          items:
+            $ref: "#/components/schemas/BudgetGoal"
+      required:
+        - created
+        - updated
+        - skipped
+        - goals
 
     BudgetGoalsResponse:
       type: object
