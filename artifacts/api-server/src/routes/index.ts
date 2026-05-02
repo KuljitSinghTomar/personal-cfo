@@ -6,6 +6,7 @@ import aiRouter from "./ai";
 import scenariosRouter from "./scenarios";
 import budgetRouter from "./budget";
 import netWorthRouter from "./net-worth";
+import categoryRulesRouter from "./category-rules";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(aiRouter);
 router.use(scenariosRouter);
 router.use(budgetRouter);
 router.use(netWorthRouter);
+router.use(categoryRulesRouter);
 
 export default router;

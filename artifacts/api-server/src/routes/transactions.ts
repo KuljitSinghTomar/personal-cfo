@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { transactionsTable } from "@workspace/db";
-import { eq, and, gte, lte, ilike, or, sql, desc, inArray } from "drizzle-orm";
+import { transactionsTable, categoryRulesTable } from "@workspace/db";
+import { eq, and, gte, lte, ilike, or, sql, desc, inArray, ne } from "drizzle-orm";
 import { parse } from "csv-parse/sync";
 import { randomUUID } from "crypto";
 import {
@@ -178,6 +178,26 @@ router.post("/transactions/import", async (req, res) => {
       trim: true,
     }) as Record<string, string>[];
 
+    // Load all active category rules once before the loop
+    const activeRules = await db
+      .select()
+      .from(categoryRulesTable)
+      .where(eq(categoryRulesTable.isActive, true));
+
+    function applyRules(merchantName: string | null, description: string, categoryName: string | null): string | null {
+      for (const rule of activeRules) {
+        const pattern = rule.matchPattern.toLowerCase();
+        if (rule.matchField === "merchant" && merchantName) {
+          if (merchantName.toLowerCase().includes(pattern)) return rule.category;
+        } else if (rule.matchField === "description") {
+          if (description.toLowerCase().includes(pattern)) return rule.category;
+        } else if (rule.matchField === "category" && categoryName) {
+          if (categoryName.toLowerCase().includes(pattern)) return rule.category;
+        }
+      }
+      return null;
+    }
+
     let imported = 0;
     let skipped = 0;
     let updated = 0;
@@ -200,16 +220,21 @@ router.post("/transactions/import", async (req, res) => {
         const isTransferCategory = (row["category_name"] ?? "").toLowerCase().includes("transfer") ||
           (row["category_name"] ?? "").toLowerCase().includes("credit card payment");
 
-        const existingRows = await db.select({ id: transactionsTable.id, updatedAt: transactionsTable.updatedAt })
+        const existingRows = await db
+          .select({ id: transactionsTable.id, userCategory: transactionsTable.userCategory })
           .from(transactionsTable)
           .where(eq(transactionsTable.transactionId, transactionId))
           .limit(1);
 
         const existingRow = existingRows[0];
 
+        const merchantName = row["merchant_name"] || null;
+        const description = row["description"] ?? "";
+        const categoryName = row["category_name"] || null;
+
         const txData = {
           transactionId,
-          description: row["description"] ?? "",
+          description,
           userDescription: row["user_description"] || null,
           amount: Math.abs(rawAmount).toFixed(2),
           currency: row["currency"] ?? "AUD",
@@ -220,10 +245,9 @@ router.post("/transactions/import", async (req, res) => {
           creditDebit,
           transactionType: row["transaction_type"] ?? "",
           providerName: row["provider_name"] ?? "",
-          merchantName: row["merchant_name"] || null,
+          merchantName,
           budgetCategory: row["budget_category"] || null,
-          categoryName: row["category_name"] || null,
-          userCategory: null as string | null,
+          categoryName,
           userTags,
           notes: row["notes"] || null,
           isTransfer: isTransferType || isTransferCategory,
@@ -233,14 +257,18 @@ router.post("/transactions/import", async (req, res) => {
         };
 
         if (existingRow) {
+          // Preserve existing userCategory — never overwrite a user's manual categorisation on re-import
           await db.update(transactionsTable)
-            .set({ ...txData, updatedAt: new Date() })
+            .set({ ...txData, userCategory: existingRow.userCategory, updatedAt: new Date() })
             .where(eq(transactionsTable.transactionId, transactionId));
           updated++;
         } else {
+          // For new transactions: apply category rules
+          const ruleCategory = applyRules(merchantName, description, categoryName);
           await db.insert(transactionsTable).values({
             id: randomUUID(),
             ...txData,
+            userCategory: ruleCategory,
           });
           imported++;
         }
@@ -295,6 +323,143 @@ router.post("/transactions/redetect-transfers", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to re-detect transfers");
     res.status(500).json({ error: "Failed to re-detect transfers" });
+  }
+});
+
+// ── Distinct categories (for pickers) ─────────────────────────────────────
+
+router.get("/transactions/categories", async (req, res) => {
+  try {
+    const rows = await db
+      .selectDistinct({ category: transactionsTable.categoryName })
+      .from(transactionsTable)
+      .where(sql`${transactionsTable.categoryName} is not null`)
+      .orderBy(transactionsTable.categoryName);
+    const userRows = await db
+      .selectDistinct({ category: transactionsTable.userCategory })
+      .from(transactionsTable)
+      .where(sql`${transactionsTable.userCategory} is not null`)
+      .orderBy(transactionsTable.userCategory);
+    const all = [...new Set([
+      ...rows.map((r) => r.category!),
+      ...userRows.map((r) => r.category!),
+    ])].sort();
+    res.json({ categories: all });
+  } catch (err) {
+    req.log.error({ err }, "Failed to list categories");
+    res.status(500).json({ error: "Failed to list categories" });
+  }
+});
+
+// ── Similar transactions ───────────────────────────────────────────────────
+
+router.get("/transactions/:id/similar", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [source] = await db
+      .select()
+      .from(transactionsTable)
+      .where(eq(transactionsTable.id, id))
+      .limit(1);
+
+    if (!source) return res.status(404).json({ error: "Transaction not found" });
+
+    let matchedOn: "merchant" | "description" = "description";
+    let matchValue = "";
+    let conditions: any[] = [ne(transactionsTable.id, id)];
+
+    if (source.merchantName && source.merchantName !== "Unknown" && source.merchantName.trim() !== "") {
+      matchedOn = "merchant";
+      matchValue = source.merchantName;
+      conditions.push(ilike(transactionsTable.merchantName, source.merchantName));
+    } else {
+      matchedOn = "description";
+      matchValue = source.description;
+      // Match by first 30 chars of description
+      const prefix = source.description.substring(0, 30).trim();
+      conditions.push(ilike(transactionsTable.description, `${prefix}%`));
+    }
+
+    const similar = await db
+      .select()
+      .from(transactionsTable)
+      .where(and(...conditions))
+      .orderBy(desc(transactionsTable.transactionDate));
+
+    if (similar.length === 0) {
+      return res.json({ count: 0, totalAmount: 0, matchedOn, matchValue, samples: [], categories: [] });
+    }
+
+    const totalAmount = similar.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
+    const dates = similar.map((t) => t.transactionDate!).sort();
+    const categories = [...new Set(similar.map((t) => t.userCategory ?? t.categoryName).filter(Boolean))];
+    const samples = similar.slice(0, 5).map((t) => ({
+      id: t.id,
+      description: t.userDescription ?? t.description,
+      amount: parseFloat(t.amount),
+      creditDebit: t.creditDebit,
+      transactionDate: t.transactionDate,
+      category: t.userCategory ?? t.categoryName ?? null,
+    }));
+
+    res.json({
+      count: similar.length,
+      totalAmount,
+      earliestDate: dates[0],
+      latestDate: dates[dates.length - 1],
+      matchedOn,
+      matchValue,
+      categories,
+      samples,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to find similar transactions");
+    res.status(500).json({ error: "Failed to find similar transactions" });
+  }
+});
+
+// ── Bulk recategorize ─────────────────────────────────────────────────────
+
+router.post("/transactions/bulk-recategorize", async (req, res) => {
+  try {
+    const { matchField, matchValue, newCategory, createRule } = req.body as {
+      matchField: "merchant" | "description";
+      matchValue: string;
+      newCategory: string;
+      createRule: boolean;
+    };
+
+    let condition: any;
+    if (matchField === "merchant") {
+      condition = ilike(transactionsTable.merchantName, matchValue);
+    } else {
+      const prefix = matchValue.substring(0, 30).trim();
+      condition = ilike(transactionsTable.description, `${prefix}%`);
+    }
+
+    const updated = await db
+      .update(transactionsTable)
+      .set({ userCategory: newCategory, updatedAt: new Date() })
+      .where(condition)
+      .returning({ id: transactionsTable.id });
+
+    let ruleId: string | null = null;
+    if (createRule) {
+      ruleId = randomUUID();
+      await db.insert(categoryRulesTable).values({
+        id: ruleId,
+        matchPattern: matchValue,
+        matchField,
+        category: newCategory,
+        isActive: true,
+      });
+    }
+
+    res.json({ updated: updated.length, ruleCreated: createRule, ruleId });
+  } catch (err) {
+    req.log.error({ err }, "Failed to bulk recategorize");
+    res.status(500).json({ error: "Failed to bulk recategorize" });
   }
 });
 

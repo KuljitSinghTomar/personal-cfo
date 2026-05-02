@@ -27,8 +27,8 @@ import {
   Pie,
   Cell,
 } from "recharts";
-import { TrendingUp, TrendingDown, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { Link } from "wouter";
+import { TrendingUp, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Link, useLocation } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 
@@ -327,7 +327,10 @@ export default function Dashboard() {
 
         {/* Accounts */}
         <div className="bg-card border border-card-border rounded-lg p-4" data-testid="accounts-summary">
-          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-4">Accounts</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Accounts</h2>
+            <span className="text-xs text-muted-foreground/60">Click to drill in</span>
+          </div>
           {accounts.isLoading ? (
             <div className="space-y-2">
               {[...Array(3)].map((_, i) => <div key={i} className="h-10 animate-pulse bg-muted rounded" />)}
@@ -335,18 +338,22 @@ export default function Dashboard() {
           ) : (accounts.data?.accounts ?? []).length === 0 ? (
             <div className="text-sm text-muted-foreground">No accounts found</div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {(accounts.data?.accounts ?? []).map((acc, i) => (
-                <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                <Link
+                  key={i}
+                  href={`/transactions?account=${encodeURIComponent(acc.accountName)}`}
+                  className="flex items-center justify-between py-2 px-2 -mx-2 border-b border-border last:border-0 rounded hover:bg-muted/40 cursor-pointer transition-colors group"
+                >
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-foreground truncate">{acc.accountName}</p>
+                    <p className="text-xs font-medium text-foreground truncate group-hover:text-primary transition-colors">{acc.accountName}</p>
                     <p className="text-xs text-muted-foreground">{acc.providerName} · {acc.transactionCount} txns</p>
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-xs text-emerald-400 tabular-nums">{formatCurrency(acc.totalCredits)} in</p>
                     <p className="text-xs text-red-400 tabular-nums">{formatCurrency(acc.totalDebits)} out</p>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
