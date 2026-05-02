@@ -423,3 +423,176 @@ export const GetBudgetStatusResponse = zod.object({
   totalBudgeted: zod.number(),
   totalSpent: zod.number(),
 });
+
+/**
+ * @summary List all net worth accounts
+ */
+export const ListNetWorthAccountsResponse = zod.object({
+  accounts: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      institution: zod.string().nullish(),
+      type: zod.enum(["asset", "liability"]),
+      category: zod.string(),
+      currentBalance: zod.number(),
+      baseBalance: zod.number(),
+      balanceSource: zod.enum(["derived", "manual"]),
+      linkedAccountNumber: zod.string().nullish(),
+      linkedAccountName: zod.string().nullish(),
+      isLinked: zod.boolean(),
+      notes: zod.string().nullish(),
+      sortOrder: zod.number(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+    }),
+  ),
+  totalAssets: zod.number(),
+  totalLiabilities: zod.number(),
+  netWorth: zod.number(),
+});
+
+/**
+ * @summary Create a net worth account
+ */
+export const CreateNetWorthAccountBody = zod.object({
+  name: zod.string(),
+  institution: zod.string().optional(),
+  type: zod.enum(["asset", "liability"]),
+  category: zod.string(),
+  currentBalance: zod.number(),
+  baseBalance: zod.number().optional(),
+  balanceSource: zod.enum(["derived", "manual"]).optional(),
+  linkedAccountNumber: zod.string().optional(),
+  linkedAccountName: zod.string().optional(),
+  isLinked: zod.boolean().optional(),
+  notes: zod.string().optional(),
+  sortOrder: zod.number().optional(),
+});
+
+export const CreateNetWorthAccountResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  institution: zod.string().nullish(),
+  type: zod.enum(["asset", "liability"]),
+  category: zod.string(),
+  currentBalance: zod.number(),
+  baseBalance: zod.number(),
+  balanceSource: zod.enum(["derived", "manual"]),
+  linkedAccountNumber: zod.string().nullish(),
+  linkedAccountName: zod.string().nullish(),
+  isLinked: zod.boolean(),
+  notes: zod.string().nullish(),
+  sortOrder: zod.number(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
+ * @summary Update a net worth account
+ */
+export const UpdateNetWorthAccountParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateNetWorthAccountBody = zod.object({
+  name: zod.string().optional(),
+  institution: zod.string().optional(),
+  currentBalance: zod.number().optional(),
+  baseBalance: zod.number().optional(),
+  notes: zod.string().optional(),
+});
+
+export const UpdateNetWorthAccountResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  institution: zod.string().nullish(),
+  type: zod.enum(["asset", "liability"]),
+  category: zod.string(),
+  currentBalance: zod.number(),
+  baseBalance: zod.number(),
+  balanceSource: zod.enum(["derived", "manual"]),
+  linkedAccountNumber: zod.string().nullish(),
+  linkedAccountName: zod.string().nullish(),
+  isLinked: zod.boolean(),
+  notes: zod.string().nullish(),
+  sortOrder: zod.number(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
+ * @summary Delete a net worth account
+ */
+export const DeleteNetWorthAccountParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteNetWorthAccountResponse = zod.object({
+  success: zod.boolean(),
+});
+
+/**
+ * @summary Current net worth summary
+ */
+export const GetNetWorthSummaryResponse = zod.object({
+  totalAssets: zod.number(),
+  totalLiabilities: zod.number(),
+  netWorth: zod.number(),
+  monthlyChange: zod.number().nullish(),
+  accounts: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      institution: zod.string().nullish(),
+      type: zod.enum(["asset", "liability"]),
+      category: zod.string(),
+      currentBalance: zod.number(),
+      baseBalance: zod.number(),
+      balanceSource: zod.enum(["derived", "manual"]),
+      linkedAccountNumber: zod.string().nullish(),
+      linkedAccountName: zod.string().nullish(),
+      isLinked: zod.boolean(),
+      notes: zod.string().nullish(),
+      sortOrder: zod.number(),
+      createdAt: zod.string(),
+      updatedAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Net worth history snapshots
+ */
+export const GetNetWorthHistoryResponse = zod.object({
+  snapshots: zod.array(
+    zod.object({
+      id: zod.string(),
+      snapshotDate: zod.string(),
+      totalAssets: zod.number(),
+      totalLiabilities: zod.number(),
+      netWorth: zod.number(),
+      createdAt: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Sync derived account balances from transactions
+ */
+export const SyncNetWorthAccountsResponse = zod.object({
+  synced: zod.number(),
+  message: zod.string(),
+});
+
+/**
+ * @summary Save a net worth snapshot for history tracking
+ */
+export const TakeNetWorthSnapshotResponse = zod.object({
+  id: zod.string(),
+  snapshotDate: zod.string(),
+  totalAssets: zod.number(),
+  totalLiabilities: zod.number(),
+  netWorth: zod.number(),
+  createdAt: zod.string(),
+});

@@ -26,8 +26,10 @@ import type {
   BudgetGoalsResponse,
   BudgetStatusResponse,
   CashflowResponse,
+  CreateNetWorthAccountBody,
   DashboardSummary,
   DeleteBudgetGoal200,
+  DeleteNetWorthAccount200,
   ForecastResponse,
   GetBudgetStatusParams,
   GetCashflowParams,
@@ -37,12 +39,19 @@ import type {
   ImportResult,
   ImportTransactionsBody,
   ListTransactionsParams,
+  NetWorthAccount,
+  NetWorthAccountsResponse,
+  NetWorthHistory,
+  NetWorthSnapshotRecord,
+  NetWorthSummary,
   ScenarioBody,
   ScenarioResult,
   SpendingByCategoryResponse,
+  SyncNetWorthAccounts200,
   Transaction,
   TransactionListResponse,
   UpdateBudgetGoalBody,
+  UpdateNetWorthAccountBody,
   UpdateTransactionBody,
 } from "./api.schemas";
 
@@ -1603,3 +1612,652 @@ export function useGetBudgetStatus<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List all net worth accounts
+ */
+export const getListNetWorthAccountsUrl = () => {
+  return `/api/net-worth/accounts`;
+};
+
+export const listNetWorthAccounts = async (
+  options?: RequestInit,
+): Promise<NetWorthAccountsResponse> => {
+  return customFetch<NetWorthAccountsResponse>(getListNetWorthAccountsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListNetWorthAccountsQueryKey = () => {
+  return [`/api/net-worth/accounts`] as const;
+};
+
+export const getListNetWorthAccountsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listNetWorthAccounts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listNetWorthAccounts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListNetWorthAccountsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listNetWorthAccounts>>
+  > = ({ signal }) => listNetWorthAccounts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listNetWorthAccounts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListNetWorthAccountsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listNetWorthAccounts>>
+>;
+export type ListNetWorthAccountsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all net worth accounts
+ */
+
+export function useListNetWorthAccounts<
+  TData = Awaited<ReturnType<typeof listNetWorthAccounts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listNetWorthAccounts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListNetWorthAccountsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a net worth account
+ */
+export const getCreateNetWorthAccountUrl = () => {
+  return `/api/net-worth/accounts`;
+};
+
+export const createNetWorthAccount = async (
+  createNetWorthAccountBody: CreateNetWorthAccountBody,
+  options?: RequestInit,
+): Promise<NetWorthAccount> => {
+  return customFetch<NetWorthAccount>(getCreateNetWorthAccountUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createNetWorthAccountBody),
+  });
+};
+
+export const getCreateNetWorthAccountMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createNetWorthAccount>>,
+    TError,
+    { data: BodyType<CreateNetWorthAccountBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createNetWorthAccount>>,
+  TError,
+  { data: BodyType<CreateNetWorthAccountBody> },
+  TContext
+> => {
+  const mutationKey = ["createNetWorthAccount"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createNetWorthAccount>>,
+    { data: BodyType<CreateNetWorthAccountBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createNetWorthAccount(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateNetWorthAccountMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createNetWorthAccount>>
+>;
+export type CreateNetWorthAccountMutationBody =
+  BodyType<CreateNetWorthAccountBody>;
+export type CreateNetWorthAccountMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a net worth account
+ */
+export const useCreateNetWorthAccount = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createNetWorthAccount>>,
+    TError,
+    { data: BodyType<CreateNetWorthAccountBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createNetWorthAccount>>,
+  TError,
+  { data: BodyType<CreateNetWorthAccountBody> },
+  TContext
+> => {
+  return useMutation(getCreateNetWorthAccountMutationOptions(options));
+};
+
+/**
+ * @summary Update a net worth account
+ */
+export const getUpdateNetWorthAccountUrl = (id: string) => {
+  return `/api/net-worth/accounts/${id}`;
+};
+
+export const updateNetWorthAccount = async (
+  id: string,
+  updateNetWorthAccountBody: UpdateNetWorthAccountBody,
+  options?: RequestInit,
+): Promise<NetWorthAccount> => {
+  return customFetch<NetWorthAccount>(getUpdateNetWorthAccountUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateNetWorthAccountBody),
+  });
+};
+
+export const getUpdateNetWorthAccountMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateNetWorthAccount>>,
+    TError,
+    { id: string; data: BodyType<UpdateNetWorthAccountBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateNetWorthAccount>>,
+  TError,
+  { id: string; data: BodyType<UpdateNetWorthAccountBody> },
+  TContext
+> => {
+  const mutationKey = ["updateNetWorthAccount"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateNetWorthAccount>>,
+    { id: string; data: BodyType<UpdateNetWorthAccountBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateNetWorthAccount(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateNetWorthAccountMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateNetWorthAccount>>
+>;
+export type UpdateNetWorthAccountMutationBody =
+  BodyType<UpdateNetWorthAccountBody>;
+export type UpdateNetWorthAccountMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a net worth account
+ */
+export const useUpdateNetWorthAccount = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateNetWorthAccount>>,
+    TError,
+    { id: string; data: BodyType<UpdateNetWorthAccountBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateNetWorthAccount>>,
+  TError,
+  { id: string; data: BodyType<UpdateNetWorthAccountBody> },
+  TContext
+> => {
+  return useMutation(getUpdateNetWorthAccountMutationOptions(options));
+};
+
+/**
+ * @summary Delete a net worth account
+ */
+export const getDeleteNetWorthAccountUrl = (id: string) => {
+  return `/api/net-worth/accounts/${id}`;
+};
+
+export const deleteNetWorthAccount = async (
+  id: string,
+  options?: RequestInit,
+): Promise<DeleteNetWorthAccount200> => {
+  return customFetch<DeleteNetWorthAccount200>(
+    getDeleteNetWorthAccountUrl(id),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getDeleteNetWorthAccountMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteNetWorthAccount>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteNetWorthAccount>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteNetWorthAccount"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteNetWorthAccount>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteNetWorthAccount(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteNetWorthAccountMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteNetWorthAccount>>
+>;
+
+export type DeleteNetWorthAccountMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a net worth account
+ */
+export const useDeleteNetWorthAccount = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteNetWorthAccount>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteNetWorthAccount>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteNetWorthAccountMutationOptions(options));
+};
+
+/**
+ * @summary Current net worth summary
+ */
+export const getGetNetWorthSummaryUrl = () => {
+  return `/api/net-worth/summary`;
+};
+
+export const getNetWorthSummary = async (
+  options?: RequestInit,
+): Promise<NetWorthSummary> => {
+  return customFetch<NetWorthSummary>(getGetNetWorthSummaryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetNetWorthSummaryQueryKey = () => {
+  return [`/api/net-worth/summary`] as const;
+};
+
+export const getGetNetWorthSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getNetWorthSummary>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getNetWorthSummary>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetNetWorthSummaryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getNetWorthSummary>>
+  > = ({ signal }) => getNetWorthSummary({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getNetWorthSummary>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetNetWorthSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getNetWorthSummary>>
+>;
+export type GetNetWorthSummaryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Current net worth summary
+ */
+
+export function useGetNetWorthSummary<
+  TData = Awaited<ReturnType<typeof getNetWorthSummary>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getNetWorthSummary>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetNetWorthSummaryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Net worth history snapshots
+ */
+export const getGetNetWorthHistoryUrl = () => {
+  return `/api/net-worth/history`;
+};
+
+export const getNetWorthHistory = async (
+  options?: RequestInit,
+): Promise<NetWorthHistory> => {
+  return customFetch<NetWorthHistory>(getGetNetWorthHistoryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetNetWorthHistoryQueryKey = () => {
+  return [`/api/net-worth/history`] as const;
+};
+
+export const getGetNetWorthHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getNetWorthHistory>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getNetWorthHistory>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetNetWorthHistoryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getNetWorthHistory>>
+  > = ({ signal }) => getNetWorthHistory({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getNetWorthHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetNetWorthHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getNetWorthHistory>>
+>;
+export type GetNetWorthHistoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Net worth history snapshots
+ */
+
+export function useGetNetWorthHistory<
+  TData = Awaited<ReturnType<typeof getNetWorthHistory>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getNetWorthHistory>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetNetWorthHistoryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Sync derived account balances from transactions
+ */
+export const getSyncNetWorthAccountsUrl = () => {
+  return `/api/net-worth/sync`;
+};
+
+export const syncNetWorthAccounts = async (
+  options?: RequestInit,
+): Promise<SyncNetWorthAccounts200> => {
+  return customFetch<SyncNetWorthAccounts200>(getSyncNetWorthAccountsUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getSyncNetWorthAccountsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncNetWorthAccounts>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof syncNetWorthAccounts>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["syncNetWorthAccounts"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof syncNetWorthAccounts>>,
+    void
+  > = () => {
+    return syncNetWorthAccounts(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SyncNetWorthAccountsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof syncNetWorthAccounts>>
+>;
+
+export type SyncNetWorthAccountsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Sync derived account balances from transactions
+ */
+export const useSyncNetWorthAccounts = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof syncNetWorthAccounts>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof syncNetWorthAccounts>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getSyncNetWorthAccountsMutationOptions(options));
+};
+
+/**
+ * @summary Save a net worth snapshot for history tracking
+ */
+export const getTakeNetWorthSnapshotUrl = () => {
+  return `/api/net-worth/snapshot`;
+};
+
+export const takeNetWorthSnapshot = async (
+  options?: RequestInit,
+): Promise<NetWorthSnapshotRecord> => {
+  return customFetch<NetWorthSnapshotRecord>(getTakeNetWorthSnapshotUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getTakeNetWorthSnapshotMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof takeNetWorthSnapshot>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof takeNetWorthSnapshot>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["takeNetWorthSnapshot"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof takeNetWorthSnapshot>>,
+    void
+  > = () => {
+    return takeNetWorthSnapshot(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TakeNetWorthSnapshotMutationResult = NonNullable<
+  Awaited<ReturnType<typeof takeNetWorthSnapshot>>
+>;
+
+export type TakeNetWorthSnapshotMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Save a net worth snapshot for history tracking
+ */
+export const useTakeNetWorthSnapshot = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof takeNetWorthSnapshot>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof takeNetWorthSnapshot>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getTakeNetWorthSnapshotMutationOptions(options));
+};

@@ -385,6 +385,143 @@ paths:
               schema:
                 $ref: "#/components/schemas/BudgetStatusResponse"
 
+  /net-worth/accounts:
+    get:
+      operationId: listNetWorthAccounts
+      tags: [netWorth]
+      summary: List all net worth accounts
+      responses:
+        "200":
+          description: Net worth accounts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetWorthAccountsResponse"
+    post:
+      operationId: createNetWorthAccount
+      tags: [netWorth]
+      summary: Create a net worth account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateNetWorthAccountBody"
+      responses:
+        "200":
+          description: Created account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetWorthAccount"
+
+  /net-worth/accounts/{id}:
+    put:
+      operationId: updateNetWorthAccount
+      tags: [netWorth]
+      summary: Update a net worth account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNetWorthAccountBody"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetWorthAccount"
+    delete:
+      operationId: deleteNetWorthAccount
+      tags: [netWorth]
+      summary: Delete a net worth account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required:
+                  - success
+
+  /net-worth/summary:
+    get:
+      operationId: getNetWorthSummary
+      tags: [netWorth]
+      summary: Current net worth summary
+      responses:
+        "200":
+          description: Net worth summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetWorthSummary"
+
+  /net-worth/history:
+    get:
+      operationId: getNetWorthHistory
+      tags: [netWorth]
+      summary: Net worth history snapshots
+      responses:
+        "200":
+          description: Historical net worth
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetWorthHistory"
+
+  /net-worth/sync:
+    post:
+      operationId: syncNetWorthAccounts
+      tags: [netWorth]
+      summary: Sync derived account balances from transactions
+      responses:
+        "200":
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  synced:
+                    type: integer
+                  message:
+                    type: string
+                required:
+                  - synced
+                  - message
+
+  /net-worth/snapshot:
+    post:
+      operationId: takeNetWorthSnapshot
+      tags: [netWorth]
+      summary: Save a net worth snapshot for history tracking
+      responses:
+        "200":
+          description: Snapshot saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetWorthSnapshotRecord"
+
 components:
   schemas:
     HealthStatus:
@@ -981,3 +1118,178 @@ components:
         - statuses
         - totalBudgeted
         - totalSpent
+
+    NetWorthAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        institution:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [asset, liability]
+        category:
+          type: string
+        currentBalance:
+          type: number
+        baseBalance:
+          type: number
+        balanceSource:
+          type: string
+          enum: [derived, manual]
+        linkedAccountNumber:
+          type: string
+          nullable: true
+        linkedAccountName:
+          type: string
+          nullable: true
+        isLinked:
+          type: boolean
+        notes:
+          type: string
+          nullable: true
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - type
+        - category
+        - currentBalance
+        - baseBalance
+        - balanceSource
+        - isLinked
+        - sortOrder
+        - createdAt
+        - updatedAt
+
+    CreateNetWorthAccountBody:
+      type: object
+      properties:
+        name:
+          type: string
+        institution:
+          type: string
+        type:
+          type: string
+          enum: [asset, liability]
+        category:
+          type: string
+        currentBalance:
+          type: number
+        baseBalance:
+          type: number
+        balanceSource:
+          type: string
+          enum: [derived, manual]
+        linkedAccountNumber:
+          type: string
+        linkedAccountName:
+          type: string
+        isLinked:
+          type: boolean
+        notes:
+          type: string
+        sortOrder:
+          type: integer
+      required:
+        - name
+        - type
+        - category
+        - currentBalance
+
+    UpdateNetWorthAccountBody:
+      type: object
+      properties:
+        name:
+          type: string
+        institution:
+          type: string
+        currentBalance:
+          type: number
+        baseBalance:
+          type: number
+        notes:
+          type: string
+
+    NetWorthAccountsResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetWorthAccount"
+        totalAssets:
+          type: number
+        totalLiabilities:
+          type: number
+        netWorth:
+          type: number
+      required:
+        - accounts
+        - totalAssets
+        - totalLiabilities
+        - netWorth
+
+    NetWorthSummary:
+      type: object
+      properties:
+        totalAssets:
+          type: number
+        totalLiabilities:
+          type: number
+        netWorth:
+          type: number
+        monthlyChange:
+          type: number
+          nullable: true
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetWorthAccount"
+      required:
+        - totalAssets
+        - totalLiabilities
+        - netWorth
+        - accounts
+
+    NetWorthSnapshotRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        snapshotDate:
+          type: string
+        totalAssets:
+          type: number
+        totalLiabilities:
+          type: number
+        netWorth:
+          type: number
+        createdAt:
+          type: string
+      required:
+        - id
+        - snapshotDate
+        - totalAssets
+        - totalLiabilities
+        - netWorth
+        - createdAt
+
+    NetWorthHistory:
+      type: object
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetWorthSnapshotRecord"
+      required:
+        - snapshots

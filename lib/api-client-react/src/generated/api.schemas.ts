@@ -278,6 +278,107 @@ export interface BudgetStatusResponse {
   totalSpent: number;
 }
 
+export type NetWorthAccountType =
+  (typeof NetWorthAccountType)[keyof typeof NetWorthAccountType];
+
+export const NetWorthAccountType = {
+  asset: "asset",
+  liability: "liability",
+} as const;
+
+export type NetWorthAccountBalanceSource =
+  (typeof NetWorthAccountBalanceSource)[keyof typeof NetWorthAccountBalanceSource];
+
+export const NetWorthAccountBalanceSource = {
+  derived: "derived",
+  manual: "manual",
+} as const;
+
+export interface NetWorthAccount {
+  id: string;
+  name: string;
+  institution?: string | null;
+  type: NetWorthAccountType;
+  category: string;
+  currentBalance: number;
+  baseBalance: number;
+  balanceSource: NetWorthAccountBalanceSource;
+  linkedAccountNumber?: string | null;
+  linkedAccountName?: string | null;
+  isLinked: boolean;
+  notes?: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CreateNetWorthAccountBodyType =
+  (typeof CreateNetWorthAccountBodyType)[keyof typeof CreateNetWorthAccountBodyType];
+
+export const CreateNetWorthAccountBodyType = {
+  asset: "asset",
+  liability: "liability",
+} as const;
+
+export type CreateNetWorthAccountBodyBalanceSource =
+  (typeof CreateNetWorthAccountBodyBalanceSource)[keyof typeof CreateNetWorthAccountBodyBalanceSource];
+
+export const CreateNetWorthAccountBodyBalanceSource = {
+  derived: "derived",
+  manual: "manual",
+} as const;
+
+export interface CreateNetWorthAccountBody {
+  name: string;
+  institution?: string;
+  type: CreateNetWorthAccountBodyType;
+  category: string;
+  currentBalance: number;
+  baseBalance?: number;
+  balanceSource?: CreateNetWorthAccountBodyBalanceSource;
+  linkedAccountNumber?: string;
+  linkedAccountName?: string;
+  isLinked?: boolean;
+  notes?: string;
+  sortOrder?: number;
+}
+
+export interface UpdateNetWorthAccountBody {
+  name?: string;
+  institution?: string;
+  currentBalance?: number;
+  baseBalance?: number;
+  notes?: string;
+}
+
+export interface NetWorthAccountsResponse {
+  accounts: NetWorthAccount[];
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+}
+
+export interface NetWorthSummary {
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+  monthlyChange?: number | null;
+  accounts: NetWorthAccount[];
+}
+
+export interface NetWorthSnapshotRecord {
+  id: string;
+  snapshotDate: string;
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+  createdAt: string;
+}
+
+export interface NetWorthHistory {
+  snapshots: NetWorthSnapshotRecord[];
+}
+
 export type ListTransactionsParams = {
   page?: number;
   limit?: number;
@@ -322,4 +423,13 @@ export type GetBudgetStatusParams = {
    * YYYY-MM format, defaults to current month
    */
   month?: string;
+};
+
+export type DeleteNetWorthAccount200 = {
+  success: boolean;
+};
+
+export type SyncNetWorthAccounts200 = {
+  synced: number;
+  message: string;
 };

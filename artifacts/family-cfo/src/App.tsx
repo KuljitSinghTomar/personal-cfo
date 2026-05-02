@@ -10,6 +10,7 @@ import Transactions from "@/pages/transactions";
 import AiAdvisor from "@/pages/ai-advisor";
 import Scenarios from "@/pages/scenarios";
 import Budget from "@/pages/budget";
+import NetWorth from "@/pages/net-worth";
 
 const queryClient = new QueryClient();
 
@@ -20,6 +21,7 @@ function Router() {
         <Route path="/" component={Dashboard} />
         <Route path="/transactions" component={Transactions} />
         <Route path="/budget" component={Budget} />
+        <Route path="/net-worth" component={NetWorth} />
         <Route path="/ai-advisor" component={AiAdvisor} />
         <Route path="/scenarios" component={Scenarios} />
         <Route component={NotFound} />

@@ -11,6 +11,7 @@ import {
   ImportTransactionsBody,
 } from "@workspace/api-zod";
 import { autoGenerateBudgetGoals } from "./budget";
+import { syncNetWorthFromTransactions } from "./net-worth";
 
 const router = Router();
 
@@ -153,6 +154,10 @@ router.post("/transactions/import", async (req, res) => {
       }
     }
 
+    // Sync net worth derived balances (fire-and-forget)
+    syncNetWorthFromTransactions(req.log).catch((e) => {
+      req.log.warn({ err: e }, "Net worth sync failed after import");
+    });
     // Auto-generate budget goals from updated transaction history (fire-and-forget)
     autoGenerateBudgetGoals(req.log).catch((e) => {
       req.log.warn({ err: e }, "Auto-generate budgets failed after import (non-fatal)");
