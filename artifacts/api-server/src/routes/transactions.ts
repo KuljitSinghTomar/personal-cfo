@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { transactionsTable } from "@workspace/db";
-import { eq, and, gte, lte, ilike, or, sql, desc } from "drizzle-orm";
+import { eq, and, gte, lte, ilike, or, sql, desc, inArray } from "drizzle-orm";
 import { parse } from "csv-parse/sync";
 import { randomUUID } from "crypto";
 import {
@@ -12,6 +12,101 @@ import {
 } from "@workspace/api-zod";
 import { autoGenerateBudgetGoals } from "./budget";
 import { syncNetWorthFromTransactions } from "./net-worth";
+
+// ── Transfer pair-matching engine ─────────────────────────────────────────
+//
+// A transaction is an internal transfer ONLY when its exact opposite exists:
+//   - Same amount (absolute)
+//   - Same or nearby date (≤ 2 calendar days)
+//   - Different account number
+//   - At least one side flagged by transaction_type OR category heuristic
+//
+// Steps:
+//   1. Collect all "candidates" (transfer_type OR transfer_category)
+//   2. Reset all candidates to is_transfer = false
+//   3. Greedily match (debit, credit) pairs
+//   4. Mark each matched pair as is_transfer = true
+
+export async function redetectTransfers(log?: any): Promise<{ matched: number; reset: number }> {
+  // 1. Identify candidates by transaction_type or category heuristic
+  const candidates = await db
+    .select({
+      id: transactionsTable.id,
+      amount: transactionsTable.amount,
+      creditDebit: transactionsTable.creditDebit,
+      transactionDate: transactionsTable.transactionDate,
+      accountNumber: transactionsTable.accountNumber,
+      transactionType: transactionsTable.transactionType,
+    })
+    .from(transactionsTable)
+    .where(
+      or(
+        eq(transactionsTable.transactionType, "transfer_incoming"),
+        eq(transactionsTable.transactionType, "transfer_outgoing"),
+        ilike(transactionsTable.categoryName, "%transfer%"),
+        ilike(transactionsTable.categoryName, "%credit card payment%"),
+      )
+    );
+
+  if (candidates.length === 0) {
+    return { matched: 0, reset: 0 };
+  }
+
+  const candidateIds = candidates.map((c) => c.id);
+
+  // 2. Reset all candidate flags — none are transfers until a pair is confirmed
+  await db
+    .update(transactionsTable)
+    .set({ isTransfer: false })
+    .where(inArray(transactionsTable.id, candidateIds));
+
+  // 3. Greedily match (debit, credit) pairs
+  const debits = candidates.filter((c) => c.creditDebit === "debit");
+  const credits = candidates.filter((c) => c.creditDebit === "credit");
+
+  // Index credits by amount for fast lookup
+  const creditsByAmount = new Map<string, typeof credits>();
+  for (const c of credits) {
+    const key = c.amount; // stored as abs value string e.g. "150.00"
+    if (!creditsByAmount.has(key)) creditsByAmount.set(key, []);
+    creditsByAmount.get(key)!.push(c);
+  }
+
+  const matchedIds: string[] = [];
+  const usedCreditIds = new Set<string>();
+
+  for (const debit of debits) {
+    const potentialCredits = creditsByAmount.get(debit.amount) ?? [];
+    for (const credit of potentialCredits) {
+      if (usedCreditIds.has(credit.id)) continue;
+      if (debit.accountNumber === credit.accountNumber) continue;
+
+      // Check date proximity (≤ 2 calendar days)
+      const debitDate = new Date(debit.transactionDate!);
+      const creditDate = new Date(credit.transactionDate!);
+      const daysDiff = Math.abs(
+        (debitDate.getTime() - creditDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      if (daysDiff > 2) continue;
+
+      // Pair confirmed — mark both
+      matchedIds.push(debit.id, credit.id);
+      usedCreditIds.add(credit.id);
+      break;
+    }
+  }
+
+  // 4. Mark matched pairs as transfers
+  if (matchedIds.length > 0) {
+    await db
+      .update(transactionsTable)
+      .set({ isTransfer: true })
+      .where(inArray(transactionsTable.id, matchedIds));
+  }
+
+  log?.info({ candidates: candidateIds.length, matched: matchedIds.length }, "Transfer re-detection complete");
+  return { matched: matchedIds.length / 2, reset: candidateIds.length };
+}
 
 const router = Router();
 
@@ -154,6 +249,16 @@ router.post("/transactions/import", async (req, res) => {
       }
     }
 
+    // Re-detect transfers using pair-matching (synchronous — must happen before response
+    // so callers immediately see correct is_transfer flags)
+    let transfersDetected = 0;
+    try {
+      const result = await redetectTransfers(req.log);
+      transfersDetected = result.matched;
+    } catch (e) {
+      req.log.warn({ err: e }, "Transfer re-detection failed (non-fatal)");
+    }
+
     // Sync net worth derived balances (fire-and-forget)
     syncNetWorthFromTransactions(req.log).catch((e) => {
       req.log.warn({ err: e }, "Net worth sync failed after import");
@@ -168,11 +273,28 @@ router.post("/transactions/import", async (req, res) => {
       skipped,
       updated,
       errors,
-      message: `Imported ${imported}, updated ${updated}, skipped ${skipped}, errors ${errors}`,
+      transferPairsDetected: transfersDetected,
+      message: `Imported ${imported}, updated ${updated}, skipped ${skipped}${transfersDetected > 0 ? `, ${transfersDetected} transfer pairs detected` : ""}`,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to import transactions");
     res.status(500).json({ error: "Failed to import transactions" });
+  }
+});
+
+// ── Manual re-detect endpoint ──────────────────────────────────────────────
+
+router.post("/transactions/redetect-transfers", async (req, res) => {
+  try {
+    const result = await redetectTransfers(req.log);
+    res.json({
+      matched: result.matched,
+      reset: result.reset,
+      message: `Re-detection complete: ${result.matched} transfer pairs confirmed from ${result.reset} candidates`,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to re-detect transfers");
+    res.status(500).json({ error: "Failed to re-detect transfers" });
   }
 });
 

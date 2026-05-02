@@ -19,7 +19,7 @@ router.get("/ai/insights", async (req, res) => {
       transactionDate: transactionsTable.transactionDate,
       merchantName: transactionsTable.merchantName,
     }).from(transactionsTable)
-      .where(and(eq(transactionsTable.included, true)));
+      .where(and(eq(transactionsTable.included, true), eq(transactionsTable.isTransfer, false)));
 
     const monthlyData: Record<string, { income: number; expenses: number }> = {};
     const categoryData: Record<string, number[]> = {};

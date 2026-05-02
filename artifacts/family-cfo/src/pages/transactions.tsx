@@ -5,8 +5,8 @@ import {
   useImportTransactions,
   useUpdateTransaction,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Search, Upload, RefreshCw, Repeat2, Clock, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { useQueryClient, useMutation } from "@tanstack/react-query";
+import { Search, Upload, RefreshCw, Repeat2, Clock, X, ChevronLeft, ChevronRight, Shuffle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -61,6 +61,19 @@ export default function Transactions() {
 
   const importMutation = useImportTransactions();
   const updateMutation = useUpdateTransaction();
+
+  const redetectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${import.meta.env.BASE_URL}api/transactions/redetect-transfers`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json() as Promise<{ matched: number; reset: number; message: string }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+      toast({ title: "Transfer re-detection complete", description: data.message });
+    },
+    onError: () => toast({ title: "Re-detection failed", variant: "destructive" }),
+  });
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -143,6 +156,17 @@ export default function Transactions() {
             className="hidden"
             data-testid="file-input-csv"
           />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => redetectMutation.mutate()}
+            disabled={redetectMutation.isPending}
+            title="Re-run pair-matching: a transfer is only flagged when both sides (debit + matching credit) exist in the database"
+            className="flex items-center gap-1.5"
+          >
+            {redetectMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Shuffle className="w-3.5 h-3.5" />}
+            Re-detect transfers
+          </Button>
           <Button
             variant="outline"
             size="sm"
