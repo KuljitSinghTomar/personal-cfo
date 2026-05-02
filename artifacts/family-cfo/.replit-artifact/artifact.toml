@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Family CFO"
+version = "1.0.0"
+id = "artifacts/family-cfo"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24046
+
+[services.development]
+run = "pnpm --filter @workspace/family-cfo run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/family-cfo", "run", "build" ]
+publicDir = "artifacts/family-cfo/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24046"
+BASE_PATH = "/"

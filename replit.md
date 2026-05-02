@@ -1,27 +1,57 @@
-# Workspace
+# Family CFO
 
-## Overview
+A Personal CFO-style finance tool for families. Provides a command center style, decision-grade dashboard built for financially sophisticated users who want real numbers, real predictions, and real intelligence.
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+## Architecture
 
-## Stack
+- **Frontend**: React + Vite (`artifacts/family-cfo/`) at path `/`
+- **Backend**: Express API server (`artifacts/api-server/`) at path `/api`
+- **Database**: PostgreSQL via Drizzle ORM (`lib/db/`)
+- **AI**: Claude (claude-sonnet-4-6) via Replit AI Integrations (`lib/integrations-anthropic-ai/`)
+- **API Contract**: OpenAPI spec in `lib/api-spec/openapi.yaml`, codegen via Orval
 
-- **Monorepo tool**: pnpm workspaces
-- **Node.js version**: 24
-- **Package manager**: pnpm
-- **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
-- **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+## Pages
 
-## Key Commands
+- `/` — Dashboard: Command centre with KPI cards, cash flow chart (bar chart, 12 months), AI insights panel, spending by category (donut), accounts summary, recent transactions
+- `/transactions` — Transaction list with filters, search, CSV import, one-click toggle for Transfer/Recurring flags
+- `/ai-advisor` — Streaming AI chat with pre-loaded suggested questions (powered by Claude)
+- `/scenarios` — Scenario engine with sliders/inputs, month-by-month projection line chart, savings rate delta
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+## Key Features
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+- **Frollo CSV ingestion**: JSON endpoint (`POST /api/transactions/import`) accepting raw CSV content. Deduplication by `transaction_id` — skips unchanged, updates changed rows.
+- **Internal transfer detection**: Auto-detected from `transaction_type` (transfer_incoming/outgoing) and `category_name` containing "transfer" or "credit card payment"
+- **Cash flow forecasting**: Real daily spend rate extrapolated to end-of-month
+- **AI Insights**: Rule-based generation from real transaction data (savings rate, category analysis, projections)
+- **Streaming AI chat**: Real SSE stream from Claude with full financial context injected
+- **Scenario engine**: Income change, new expense, investment, debt payoff, holiday budget simulations with monthly projections
+
+## Database Schema
+
+- `transactions` table: Full Frollo CSV field mapping, unique on `transaction_id`, includes `is_transfer`, `is_recurring`, `user_category`, `user_tags`, `ai_confidence_score`
+
+## API Routes
+
+- `GET /api/transactions` — list with filters (page, limit, search, category, creditDebit, isTransfer, isRecurring)
+- `POST /api/transactions/import` — Frollo CSV import (JSON body: `{ csvContent }`)
+- `PATCH /api/transactions/:id` — update transaction flags and user data
+- `GET /api/dashboard/summary` — KPI aggregates
+- `GET /api/dashboard/cashflow` — monthly cashflow data for chart
+- `GET /api/dashboard/spending-by-category` — category breakdown
+- `GET /api/dashboard/accounts` — accounts summary
+- `GET /api/dashboard/forecast` — end-of-month projection
+- `GET /api/ai/insights` — rule-based AI insights from transaction data
+- `POST /api/ai/chat` — streaming SSE AI chat (Claude sonnet-4-6)
+- `POST /api/scenarios/simulate` — financial scenario simulation
+
+## Environment Variables
+
+- `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` — PostgreSQL connection
+- `AI_INTEGRATIONS_ANTHROPIC_BASE_URL`, `AI_INTEGRATIONS_ANTHROPIC_API_KEY` — Anthropic via Replit AI Integrations
+- `SESSION_SECRET` — Session secret (available but not currently used for auth since this is a no-login family tool)
+
+## Design
+
+- Dark-first palette: deep navy background (`220 20% 8%`), emerald green primary (`160 84% 39%`), blue/purple chart colors
+- Information-dense, cockpit aesthetic
+- Fully responsive: sidebar collapses to top nav on mobile

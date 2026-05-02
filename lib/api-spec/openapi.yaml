@@ -3,20 +3,28 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Family CFO API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: transactions
+    description: Transaction management
+  - name: dashboard
+    description: Dashboard and analytics
+  - name: ai
+    description: AI insights and chat
+  - name: scenarios
+    description: Financial scenario simulation
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +32,248 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /transactions:
+    get:
+      operationId: listTransactions
+      tags: [transactions]
+      summary: List transactions with filters
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: accountName
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: creditDebit
+          in: query
+          schema:
+            type: string
+            enum: [credit, debit]
+        - name: isTransfer
+          in: query
+          schema:
+            type: boolean
+        - name: isRecurring
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionListResponse"
+
+  /transactions/import:
+    post:
+      operationId: importTransactions
+      tags: [transactions]
+      summary: Import transactions from Frollo CSV (raw CSV content as text)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportTransactionsBody"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+
+  /transactions/{id}:
+    patch:
+      operationId: updateTransaction
+      tags: [transactions]
+      summary: Update transaction (category, tags, isTransfer, isRecurring, userDescription)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTransactionBody"
+      responses:
+        "200":
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get financial summary for date range
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/cashflow:
+    get:
+      operationId: getCashflow
+      tags: [dashboard]
+      summary: Get cash flow data for chart (monthly breakdown)
+      parameters:
+        - name: months
+          in: query
+          schema:
+            type: integer
+            default: 12
+      responses:
+        "200":
+          description: Cashflow chart data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashflowResponse"
+
+  /dashboard/spending-by-category:
+    get:
+      operationId: getSpendingByCategory
+      tags: [dashboard]
+      summary: Get spending breakdown by category
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Spending by category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpendingByCategoryResponse"
+
+  /dashboard/accounts:
+    get:
+      operationId: getAccounts
+      tags: [dashboard]
+      summary: List all accounts with balance summary
+      responses:
+        "200":
+          description: Account list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountsResponse"
+
+  /dashboard/forecast:
+    get:
+      operationId: getForecast
+      tags: [dashboard]
+      summary: Get end-of-month savings forecast
+      responses:
+        "200":
+          description: Forecast data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForecastResponse"
+
+  /ai/insights:
+    get:
+      operationId: getAiInsights
+      tags: [ai]
+      summary: Get AI-generated financial insights
+      responses:
+        "200":
+          description: AI insights
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiInsightsResponse"
+
+  /ai/chat:
+    post:
+      operationId: sendAiMessage
+      tags: [ai]
+      summary: Send a message to the AI financial advisor (streaming SSE)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiChatBody"
+      responses:
+        "200":
+          description: Streaming SSE response
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /scenarios/simulate:
+    post:
+      operationId: simulateScenario
+      tags: [scenarios]
+      summary: Simulate a financial scenario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScenarioBody"
+      responses:
+        "200":
+          description: Scenario result with monthly projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioResult"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +284,466 @@ components:
       required:
         - status
 
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: string
+        transactionId:
+          type: string
+        description:
+          type: string
+        userDescription:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        currency:
+          type: string
+        transactionDate:
+          type: string
+        postedDate:
+          type: string
+          nullable: true
+        accountNumber:
+          type: string
+        accountName:
+          type: string
+        creditDebit:
+          type: string
+          enum: [credit, debit]
+        transactionType:
+          type: string
+        providerName:
+          type: string
+        merchantName:
+          type: string
+          nullable: true
+        budgetCategory:
+          type: string
+          nullable: true
+        categoryName:
+          type: string
+          nullable: true
+        userCategory:
+          type: string
+          nullable: true
+        userTags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+          nullable: true
+        isTransfer:
+          type: boolean
+        isRecurring:
+          type: boolean
+        aiConfidenceScore:
+          type: number
+          nullable: true
+        included:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - transactionId
+        - description
+        - amount
+        - currency
+        - transactionDate
+        - accountNumber
+        - accountName
+        - creditDebit
+        - transactionType
+        - providerName
+        - isTransfer
+        - isRecurring
+        - included
+        - createdAt
+        - updatedAt
+        - userTags
+
+    TransactionListResponse:
+      type: object
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Transaction"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+      required:
+        - transactions
+        - total
+        - page
+        - limit
+        - totalPages
+
+    UpdateTransactionBody:
+      type: object
+      properties:
+        userDescription:
+          type: string
+          nullable: true
+        userCategory:
+          type: string
+          nullable: true
+        userTags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+          nullable: true
+        isTransfer:
+          type: boolean
+        isRecurring:
+          type: boolean
+        included:
+          type: boolean
+
+    ImportTransactionsBody:
+      type: object
+      properties:
+        csvContent:
+          type: string
+          description: Raw CSV content from Frollo export
+        fileName:
+          type: string
+      required:
+        - csvContent
+
+    ImportResult:
+      type: object
+      properties:
+        imported:
+          type: integer
+        skipped:
+          type: integer
+        updated:
+          type: integer
+        errors:
+          type: integer
+        message:
+          type: string
+      required:
+        - imported
+        - skipped
+        - updated
+        - errors
+        - message
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalIncome:
+          type: number
+        totalExpenses:
+          type: number
+        netCashflow:
+          type: number
+        savingsRate:
+          type: number
+        transfersFiltered:
+          type: integer
+        transactionCount:
+          type: integer
+        periodLabel:
+          type: string
+        topCategories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategorySummary"
+      required:
+        - totalIncome
+        - totalExpenses
+        - netCashflow
+        - savingsRate
+        - transfersFiltered
+        - transactionCount
+        - periodLabel
+        - topCategories
+
+    CategorySummary:
+      type: object
+      properties:
+        category:
+          type: string
+        amount:
+          type: number
+        count:
+          type: integer
+        percentage:
+          type: number
+      required:
+        - category
+        - amount
+        - count
+        - percentage
+
+    CashflowResponse:
+      type: object
+      properties:
+        months:
+          type: array
+          items:
+            $ref: "#/components/schemas/MonthlyData"
+        averageIncome:
+          type: number
+        averageExpenses:
+          type: number
+        averageSavings:
+          type: number
+      required:
+        - months
+        - averageIncome
+        - averageExpenses
+        - averageSavings
+
+    MonthlyData:
+      type: object
+      properties:
+        month:
+          type: string
+        income:
+          type: number
+        expenses:
+          type: number
+        savings:
+          type: number
+        transfers:
+          type: number
+      required:
+        - month
+        - income
+        - expenses
+        - savings
+        - transfers
+
+    SpendingByCategoryResponse:
+      type: object
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategorySummary"
+        totalSpend:
+          type: number
+      required:
+        - categories
+        - totalSpend
+
+    AccountsResponse:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountSummary"
+      required:
+        - accounts
+
+    AccountSummary:
+      type: object
+      properties:
+        accountName:
+          type: string
+        accountNumber:
+          type: string
+        providerName:
+          type: string
+        totalCredits:
+          type: number
+        totalDebits:
+          type: number
+        transactionCount:
+          type: integer
+        lastActivity:
+          type: string
+      required:
+        - accountName
+        - accountNumber
+        - providerName
+        - totalCredits
+        - totalDebits
+        - transactionCount
+        - lastActivity
+
+    ForecastResponse:
+      type: object
+      properties:
+        currentMonthSpend:
+          type: number
+        projectedMonthSpend:
+          type: number
+        projectedSavings:
+          type: number
+        averageMonthlyIncome:
+          type: number
+        daysRemainingInMonth:
+          type: integer
+        onTrackMessage:
+          type: string
+        runwayMonths:
+          type: number
+      required:
+        - currentMonthSpend
+        - projectedMonthSpend
+        - projectedSavings
+        - averageMonthlyIncome
+        - daysRemainingInMonth
+        - onTrackMessage
+        - runwayMonths
+
+    AiInsightsResponse:
+      type: object
+      properties:
+        insights:
+          type: array
+          items:
+            $ref: "#/components/schemas/AiInsight"
+        generatedAt:
+          type: string
+      required:
+        - insights
+        - generatedAt
+
+    AiInsight:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [savings_opportunity, spending_pattern, forecast, warning, positive]
+        title:
+          type: string
+        message:
+          type: string
+        impact:
+          type: number
+          nullable: true
+        priority:
+          type: integer
+      required:
+        - id
+        - type
+        - title
+        - message
+        - priority
+
+    AiChatBody:
+      type: object
+      properties:
+        message:
+          type: string
+        conversationHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+      required:
+        - message
+        - conversationHistory
+
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+      required:
+        - role
+        - content
+
+    ScenarioBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [income_change, new_expense, investment, debt_payoff, holiday]
+        incomeChangePercent:
+          type: number
+          nullable: true
+        newMonthlyExpense:
+          type: number
+          nullable: true
+        expenseLabel:
+          type: string
+          nullable: true
+        investmentAmount:
+          type: number
+          nullable: true
+        debtAmount:
+          type: number
+          nullable: true
+        debtInterestRate:
+          type: number
+          nullable: true
+        holidayBudget:
+          type: number
+          nullable: true
+        projectionMonths:
+          type: integer
+          default: 12
+      required:
+        - type
+
+    ScenarioResult:
+      type: object
+      properties:
+        summary:
+          type: string
+        currentSavingsRate:
+          type: number
+        newSavingsRate:
+          type: number
+        monthlyCashflowImpact:
+          type: number
+        runwayMonthsCurrent:
+          type: number
+        runwayMonthsNew:
+          type: number
+        monthlyProjection:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectionMonth"
+      required:
+        - summary
+        - currentSavingsRate
+        - newSavingsRate
+        - monthlyCashflowImpact
+        - runwayMonthsCurrent
+        - runwayMonthsNew
+        - monthlyProjection
+
+    ProjectionMonth:
+      type: object
+      properties:
+        month:
+          type: string
+        income:
+          type: number
+        expenses:
+          type: number
+        savings:
+          type: number
+        cumulativeSavings:
+          type: number
+      required:
+        - month
+        - income
+        - expenses
+        - savings
+        - cumulativeSavings
