@@ -79,6 +79,7 @@ interface DrillState {
   startDate?: string;
   endDate?: string;
   label: string;
+  initialCategory?: string;
 }
 
 interface CategoryRow {
@@ -134,7 +135,7 @@ function DrillDownSheet({
   useEffect(() => {
     if (!drill) { setCategories([]); setSelectedCategory(null); setCatSearch(""); return; }
     setCatLoading(true);
-    setSelectedCategory(null);
+    setSelectedCategory(drill.initialCategory ?? null);
     setTxPage(1);
     setCatSearch("");
     const params = new URLSearchParams({ type: drill.type });
@@ -709,6 +710,7 @@ export default function Dashboard() {
                         startDate: dateRange?.startDate,
                         endDate: dateRange?.endDate,
                         label: selectedLabel,
+                        initialCategory: entry?.name,
                       });
                     }}
                     style={{ cursor: "pointer" }}
@@ -730,6 +732,7 @@ export default function Dashboard() {
                         startDate: dateRange?.startDate,
                         endDate: dateRange?.endDate,
                         label: selectedLabel,
+                        initialCategory: c.name,
                       });
                     }}
                     className="w-full flex items-center justify-between text-xs hover:bg-muted/40 rounded px-1 py-0.5 -mx-1 transition-colors group"
