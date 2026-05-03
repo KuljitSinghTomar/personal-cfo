@@ -38,7 +38,7 @@ function formatCurrency(v: number) {
 function getLast13Months() {
   const months: { value: string; label: string }[] = [];
   const now = new Date();
-  for (let i = 0; i < 13; i++) {
+  for (let i = 0; i < 1; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const value = d.toISOString().substring(0, 7);
     const label = d.toLocaleString("en-AU", { month: "long", year: "numeric" });
