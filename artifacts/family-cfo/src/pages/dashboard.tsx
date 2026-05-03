@@ -16,7 +16,8 @@ import {
   getListTransactionsQueryKey,
 } from "@workspace/api-client-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
+  ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Line,
 } from "recharts";
 import {
   TrendingUp, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle,
@@ -40,11 +41,10 @@ function formatCurrencyFull(amount: number) {
 
 // ── Date range presets ─────────────────────────────────────────────────────
 
-type DatePreset = "this-month" | "last-month" | "last-3m" | "last-6m" | "this-fy" | "last-fy" | "last-12m" | "all-time" | "custom";
+type DatePreset = "last-3m" | "last-6m" | "this-fy" | "last-fy" | "last-12m" | "all-time" | "custom";
+type ActiveMode = "month-nav" | DatePreset;
 
 const PRESETS: { id: DatePreset; label: string }[] = [
-  { id: "this-month", label: "This Month" },
-  { id: "last-month", label: "Last Month" },
   { id: "last-3m", label: "Last 3 Months" },
   { id: "last-6m", label: "Last 6 Months" },
   { id: "this-fy", label: "This FY" },
@@ -53,6 +53,35 @@ const PRESETS: { id: DatePreset; label: string }[] = [
   { id: "all-time", label: "All Time" },
   { id: "custom", label: "Custom…" },
 ];
+
+function getCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function stepNavMonth(month: string, dir: 1 | -1): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y!, m! - 1, 1);
+  d.setMonth(d.getMonth() + dir);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function navMonthLabel(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(y!, m! - 1, 1).toLocaleString("en-AU", { month: "long", year: "numeric" });
+}
+
+function linearTrend(values: number[]): number[] {
+  const n = values.length;
+  if (n < 2) return values;
+  const sumX = (n * (n - 1)) / 2;
+  const sumY = values.reduce((s, v) => s + v, 0);
+  const sumXY = values.reduce((s, v, i) => s + i * v, 0);
+  const sumX2 = values.reduce((s, _v, i) => s + i * i, 0);
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  return values.map((_v, i) => Math.max(0, intercept + slope * i));
+}
 
 function fmtDate(d: Date) { return d.toISOString().substring(0, 10); }
 
@@ -537,21 +566,30 @@ function MetricCard({
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [selectedPreset, setSelectedPreset] = useState<DatePreset>("last-12m");
+  const [activeMode, setActiveMode] = useState<ActiveMode>("last-12m");
+  const [navMonth, setNavMonth] = useState<string>(getCurrentMonth());
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [drill, setDrill] = useState<DrillState | null>(null);
 
-  const isCustom = selectedPreset === "custom";
-  const presetRange = selectedPreset !== "custom" ? getPresetRange(selectedPreset) : {};
-  const dateRange = isCustom
-    ? { startDate: customStart || undefined, endDate: customEnd || undefined }
-    : presetRange;
-  const selectedLabel = getPresetLabel(selectedPreset, customStart, customEnd);
+  const isMonthNav = activeMode === "month-nav";
+  const isCustom = activeMode === "custom";
 
-  // "This Month" gets compared to "Last Month"; all other presets show no comparison
-  const showComparison = selectedPreset === "this-month";
-  const prevRange = showComparison ? getPresetRange("last-month") : null;
+  const dateRange = (() => {
+    if (isMonthNav) return getMonthDateRange(navMonth);
+    if (isCustom) return { startDate: customStart || undefined, endDate: customEnd || undefined };
+    return getPresetRange(activeMode);
+  })();
+
+  const selectedLabel = (() => {
+    if (isMonthNav) return navMonthLabel(navMonth);
+    if (isCustom && (customStart || customEnd)) return `${customStart ?? "?"} → ${customEnd ?? "?"}`;
+    return getPresetLabel(activeMode);
+  })();
+
+  // Compare to prior month when viewing a single month
+  const showComparison = isMonthNav;
+  const prevRange = isMonthNav ? getMonthDateRange(stepNavMonth(navMonth, -1)) : null;
 
   const summaryParams = { startDate: dateRange.startDate, endDate: dateRange.endDate };
   const summary = useGetDashboardSummary(summaryParams, {
@@ -585,13 +623,18 @@ export default function Dashboard() {
   const s = summary.data;
   const f = forecast.data;
 
-  const cashflowData = (cashflow.data?.months ?? []).map((m) => ({
+  const rawMonths = cashflow.data?.months ?? [];
+  const incomeTrend = linearTrend(rawMonths.map((m) => m.income));
+  const expenseTrend = linearTrend(rawMonths.map((m) => m.expenses));
+  const cashflowData = rawMonths.map((m, i) => ({
     month: m.month.substring(5),
     fullMonth: m.month,
     Income: m.income,
     Expenses: m.expenses,
     Investments: m.investments,
     Savings: m.savings,
+    IncomeTrend: incomeTrend[i],
+    ExpensesTrend: expenseTrend[i],
   }));
 
   const pieData = (categories.data?.categories ?? []).slice(0, 7).map((c, i) => ({
@@ -626,16 +669,48 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Date range preset pills */}
+        {/* Date range filter bar */}
         <div className="space-y-2">
           <div className="flex items-center gap-1.5 flex-wrap">
             <Calendar className="w-3.5 h-3.5 text-muted-foreground/60 flex-shrink-0" />
+
+            {/* ── Month navigator ── */}
+            <button
+              onClick={() => { setNavMonth(m => stepNavMonth(m, -1)); setActiveMode("month-nav"); }}
+              className="h-7 w-7 flex items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors"
+              title="Previous month"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setActiveMode("month-nav")}
+              className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors whitespace-nowrap ${
+                isMonthNav
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 bg-transparent"
+              }`}
+            >
+              {navMonthLabel(navMonth)}
+            </button>
+            <button
+              onClick={() => { setNavMonth(m => stepNavMonth(m, 1)); setActiveMode("month-nav"); }}
+              className="h-7 w-7 flex items-center justify-center rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={navMonth >= getCurrentMonth()}
+              title="Next month"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+
+            {/* ── Divider ── */}
+            <div className="w-px h-5 bg-border mx-1 flex-shrink-0" />
+
+            {/* ── Multi-period presets ── */}
             {PRESETS.map((p) => (
               <button
                 key={p.id}
-                onClick={() => setSelectedPreset(p.id)}
+                onClick={() => setActiveMode(p.id)}
                 className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors whitespace-nowrap ${
-                  selectedPreset === p.id
+                  activeMode === p.id
                     ? "bg-primary text-primary-foreground border-primary"
                     : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 bg-transparent"
                 }`}
@@ -644,6 +719,7 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
+
           {isCustom && (
             <div className="flex items-center gap-2 pl-5">
               <input
@@ -745,9 +821,23 @@ export default function Dashboard() {
               <p className="text-[10px] text-muted-foreground/50 mt-0.5">Click income or expense bar to drill in</p>
             </div>
             {cashflow.data && (
-              <div className="flex gap-4 text-xs text-muted-foreground">
-                <span>Avg Income <span className="text-emerald-400 font-semibold">{formatCurrency(cashflow.data.averageIncome)}</span></span>
-                <span>Avg Expenses <span className="text-red-400 font-semibold">{formatCurrency(cashflow.data.averageExpenses)}</span></span>
+              <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+                <div className="flex gap-4">
+                  <span>Avg Income <span className="text-emerald-400 font-semibold">{formatCurrency(cashflow.data.averageIncome)}</span></span>
+                  <span>Avg Expenses <span className="text-red-400 font-semibold">{formatCurrency(cashflow.data.averageExpenses)}</span></span>
+                </div>
+                {rawMonths.length >= 3 && (
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                    <span className="flex items-center gap-1">
+                      <svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#10b981" strokeWidth="2" strokeDasharray="4 2"/></svg>
+                      income trend
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#ef4444" strokeWidth="2" strokeDasharray="4 2"/></svg>
+                      expense trend
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -759,7 +849,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={cashflowData} barGap={2} barCategoryGap="20%">
+              <ComposedChart data={cashflowData} barGap={2} barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis
                   dataKey="month"
@@ -778,7 +868,10 @@ export default function Dashboard() {
                 <Tooltip
                   contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 12 }}
                   labelStyle={{ color: "hsl(var(--foreground))" }}
-                  formatter={(v: number) => formatCurrency(v)}
+                  formatter={(v: number, name: string) => {
+                    if (name === "IncomeTrend" || name === "ExpensesTrend") return null;
+                    return formatCurrency(v);
+                  }}
                 />
                 <Bar
                   dataKey="Income"
@@ -802,7 +895,13 @@ export default function Dashboard() {
                 />
                 <Bar dataKey="Investments" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
                 <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-              </BarChart>
+                {rawMonths.length >= 3 && (
+                  <>
+                    <Line dataKey="IncomeTrend" stroke="#10b981" strokeWidth={2} dot={false} strokeDasharray="5 3" type="linear" legendType="none" />
+                    <Line dataKey="ExpensesTrend" stroke="#ef4444" strokeWidth={2} dot={false} strokeDasharray="5 3" type="linear" legendType="none" />
+                  </>
+                )}
+              </ComposedChart>
             </ResponsiveContainer>
           )}
         </div>
