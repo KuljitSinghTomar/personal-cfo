@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   useGetDashboardSummary,
   getGetDashboardSummaryQueryKey,
@@ -37,6 +37,7 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { useToast } from "@/hooks/use-toast";
+import { BulkApplyDialog, type BulkDialogState, type MatchCriterion } from "@/components/bulk-recategorize-dialog";
 
 const CHART_COLORS = ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
 const BASE = import.meta.env.BASE_URL;
@@ -199,12 +200,14 @@ function CategoryPickerButton({
   currentCategory,
   allCategories,
   onCategoryChange,
+  onDone,
   isLoading,
 }: {
   txId: string;
   currentCategory: string | null;
   allCategories: string[];
   onCategoryChange: (txId: string, newCat: string) => void;
+  onDone: (txId: string, newCat: string, oldCat: string | null) => void;
   isLoading: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -212,6 +215,7 @@ function CategoryPickerButton({
   const handleSelect = (cat: string) => {
     if (cat === currentCategory) { setOpen(false); return; }
     onCategoryChange(txId, cat);
+    onDone(txId, cat, currentCategory);
     setOpen(false);
   };
 
@@ -272,6 +276,7 @@ function DrillDownSheet({
   const [catLoading, setCatLoading] = useState(false);
   const [catSearch, setCatSearch] = useState("");
   const [allCategories, setAllCategories] = useState<string[]>([]);
+  const [bulkDialog, setBulkDialog] = useState<BulkDialogState | null>(null);
 
   // Transactions level state
   const [txPage, setTxPage] = useState(1);
@@ -333,11 +338,45 @@ function DrillDownSheet({
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey(txParams ?? { page: 1, limit: TX_LIMIT }) });
-          toast({ title: "Category updated", description: `Recategorised as "${newCat}"` });
         },
         onError: () => toast({ title: "Failed to update category", variant: "destructive" }),
       }
     );
+  };
+
+  const handleCategoryChanged = useCallback(async (txId: string, newCat: string, oldCat: string | null) => {
+    queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey(txParams ?? { page: 1, limit: TX_LIMIT }) });
+    try {
+      const res = await fetch(`${BASE}api/transactions/${txId}/similar`);
+      if (!res.ok) { toast({ title: "Category updated", description: `Recategorised as "${newCat}"` }); return; }
+      const data: { source: any; defaultCriteria: MatchCriterion[]; results: any } = await res.json();
+      if (data.results.count > 0) {
+        setBulkDialog({ txId, oldCategory: oldCat, newCategory: newCat, source: data.source, defaultCriteria: data.defaultCriteria, results: data.results });
+      } else {
+        toast({ title: "Category updated", description: `Recategorised as "${newCat}"` });
+      }
+    } catch {
+      toast({ title: "Category updated", description: `Recategorised as "${newCat}"` });
+    }
+  }, [queryClient, toast, txParams]);
+
+  const handleBulkApply = async (criteria: MatchCriterion[], createRule: boolean) => {
+    if (!bulkDialog) return;
+    const { txId, newCategory } = bulkDialog;
+    const res = await fetch(`${BASE}api/transactions/bulk-recategorize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ txId, criteria, newCategory, createRule }),
+    });
+    const data = await res.json();
+    queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey(txParams ?? { page: 1, limit: TX_LIMIT }) });
+    toast({
+      title: `Updated ${data.updated} transactions`,
+      description: createRule
+        ? `Recategorised as "${newCategory}" and created a rule for future imports`
+        : `Recategorised as "${newCategory}"`,
+    });
+    setBulkDialog(null);
   };
 
   if (!drill) return null;
@@ -364,28 +403,26 @@ function DrillDownSheet({
   if (drill.endDate) viewAllParams.set("endDate", drill.endDate);
 
   return (
-    <Sheet open={!!drill} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent
-        side="right"
-        className="w-full sm:max-w-2xl flex flex-col p-0 gap-0"
-      >
-        {/* ── Header ───────────────────────────────────────────── */}
-        <SheetHeader className="px-5 pt-5 pb-3 border-b border-border flex-shrink-0">
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
-            <button
-              onClick={() => setSelectedCategory(null)}
-              className={`hover:text-foreground transition-colors ${!selectedCategory ? "text-foreground font-medium" : ""}`}
-            >
-              {isIncome ? "Income" : "Expenses"}
-            </button>
-            {selectedCategory && (
-              <>
-                <ChevronRight className="w-3 h-3" />
-                <span className="text-foreground font-medium truncate max-w-[180px]">{selectedCategory}</span>
-              </>
-            )}
-          </div>
+    <>
+      <Sheet open={!!drill} onOpenChange={(open) => { if (!open) onClose(); }}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl flex flex-col p-0 gap-0">
+          {/* ── Header ───────────────────────────────────────────── */}
+          <SheetHeader className="px-5 pt-5 pb-3 border-b border-border flex-shrink-0">
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+              <button
+                onClick={() => setSelectedCategory(null)}
+                className={`hover:text-foreground transition-colors ${!selectedCategory ? "text-foreground font-medium" : ""}`}
+              >
+                {isIncome ? "Income" : "Expenses"}
+              </button>
+              {selectedCategory && (
+                <>
+                  <ChevronRight className="w-3 h-3" />
+                  <span className="text-foreground font-medium truncate max-w-[180px]">{selectedCategory}</span>
+                </>
+              )}
+            </div>
 
           <SheetTitle className="text-base leading-tight">
             {selectedCategory ? (
@@ -543,6 +580,7 @@ function DrillDownSheet({
                             currentCategory={tx.userCategory ?? tx.categoryName}
                             allCategories={allCategories}
                             onCategoryChange={handleCategoryChange}
+                            onDone={handleCategoryChanged}
                             isLoading={updateMutation.isPending}
                           />
                         </div>
@@ -600,7 +638,13 @@ function DrillDownSheet({
           )}
         </div>
       </SheetContent>
-    </Sheet>
+      </Sheet>
+      <BulkApplyDialog
+        state={bulkDialog}
+        onClose={() => setBulkDialog(null)}
+        onApply={handleBulkApply}
+      />
+    </>
   );
 }
 
