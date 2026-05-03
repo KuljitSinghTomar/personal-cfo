@@ -219,6 +219,75 @@ router.get("/transactions", async (req, res) => {
   }
 });
 
+// ── Grouped transfers ──────────────────────────────────────────────────────
+
+router.get("/transfers/grouped", async (req, res) => {
+  try {
+    const rows = await db
+      .select()
+      .from(transactionsTable)
+      .where(and(eq(transactionsTable.isTransfer, true), eq(transactionsTable.included, true)))
+      .orderBy(desc(transactionsTable.transactionDate));
+
+    const debits = rows.filter((r) => r.creditDebit === "debit");
+    const credits = rows.filter((r) => r.creditDebit === "credit");
+
+    const usedCreditIds = new Set<string>();
+    const usedDebitIds = new Set<string>();
+    const pairs: Array<{
+      id: string;
+      amount: number;
+      date: string;
+      daysApart: number;
+      outgoing: ReturnType<typeof serializeTransaction>;
+      incoming: ReturnType<typeof serializeTransaction>;
+    }> = [];
+
+    for (const debit of debits) {
+      const debitAmount = parseFloat(debit.amount);
+      const debitMs = new Date(debit.transactionDate!).getTime();
+
+      // Find the closest matching credit (same amount, within 3 days)
+      let bestMatch: (typeof credits)[0] | null = null;
+      let bestGap = Infinity;
+      for (const credit of credits) {
+        if (usedCreditIds.has(credit.id)) continue;
+        const creditAmount = parseFloat(credit.amount);
+        if (Math.abs(creditAmount - debitAmount) > 0.01) continue;
+        const gap = Math.abs(new Date(credit.transactionDate!).getTime() - debitMs);
+        const days = gap / (1000 * 60 * 60 * 24);
+        if (days <= 3 && gap < bestGap) { bestMatch = credit; bestGap = gap; }
+      }
+
+      if (bestMatch) {
+        usedCreditIds.add(bestMatch.id);
+        usedDebitIds.add(debit.id);
+        const daysApart = Math.round(bestGap / (1000 * 60 * 60 * 24));
+        const date = debit.transactionDate! <= bestMatch.transactionDate! ? debit.transactionDate! : bestMatch.transactionDate!;
+        pairs.push({
+          id: `${debit.id}__${bestMatch.id}`,
+          amount: debitAmount,
+          date,
+          daysApart,
+          outgoing: serializeTransaction(debit),
+          incoming: serializeTransaction(bestMatch),
+        });
+      }
+    }
+
+    const unpaired = rows
+      .filter((r) => !usedCreditIds.has(r.id) && !usedDebitIds.has(r.id))
+      .map(serializeTransaction);
+
+    pairs.sort((a, b) => b.date.localeCompare(a.date));
+
+    res.json({ pairs, unpaired, totalPairs: pairs.length, totalUnpaired: unpaired.length });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get grouped transfers");
+    res.status(500).json({ error: "Failed to get grouped transfers" });
+  }
+});
+
 // ── Import CSV ─────────────────────────────────────────────────────────────
 
 router.post("/transactions/import", async (req, res) => {

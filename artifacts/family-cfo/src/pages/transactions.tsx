@@ -10,7 +10,7 @@ import { useSearch } from "wouter";
 import {
   Search, Upload, RefreshCw, Repeat2, Clock, X,
   ChevronLeft, ChevronRight, Shuffle, Tag, Check, ChevronsUpDown,
-  AlertTriangle, Layers, Fingerprint,
+  AlertTriangle, Layers, Fingerprint, ArrowRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,35 @@ interface BulkDialogState {
   source: SourceInfo;
   defaultCriteria: MatchCriterion[];
   results: SimilarResults;
+}
+
+interface TransferTx {
+  id: string;
+  description: string;
+  userDescription?: string | null;
+  amount: number;
+  creditDebit: string;
+  transactionDate: string;
+  accountName: string;
+  categoryName?: string | null;
+  userCategory?: string | null;
+  transactionType: string;
+}
+
+interface TransferPair {
+  id: string;
+  amount: number;
+  date: string;
+  daysApart: number;
+  outgoing: TransferTx;
+  incoming: TransferTx;
+}
+
+interface GroupedTransfers {
+  pairs: TransferPair[];
+  unpaired: TransferTx[];
+  totalPairs: number;
+  totalUnpaired: number;
 }
 
 // ── Criterion chip ─────────────────────────────────────────────────────────
@@ -440,6 +469,23 @@ export default function Transactions() {
     if (urlAccount) setAccountName(urlAccount);
   }, [urlAccount]);
 
+  const [groupedTransfers, setGroupedTransfers] = useState<GroupedTransfers | null>(null);
+  const [groupedLoading, setGroupedLoading] = useState(false);
+
+  const refreshGrouped = useCallback(() => {
+    setGroupedLoading(true);
+    fetch(`${BASE}api/transfers/grouped`)
+      .then((r) => r.json())
+      .then((d: GroupedTransfers) => setGroupedTransfers(d))
+      .catch(() => {})
+      .finally(() => setGroupedLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "transfers") return;
+    refreshGrouped();
+  }, [activeTab, refreshGrouped]);
+
   const limit = 20;
   const params = {
     page, limit,
@@ -500,8 +546,28 @@ export default function Transactions() {
   const markAsTransfer = (id: string, current: boolean) => {
     updateMutation.mutate(
       { id, data: { isTransfer: !current } },
-      { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() }); toast({ title: "Updated", description: `Marked as ${!current ? "transfer" : "not a transfer"}` }); } }
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+          if (activeTab === "transfers") refreshGrouped();
+          toast({ title: "Updated", description: `Marked as ${!current ? "transfer" : "not a transfer"}` });
+        },
+      }
     );
+  };
+
+  const unmarkPair = async (outId: string, inId: string) => {
+    try {
+      await Promise.all([
+        fetch(`${BASE}api/transactions/${outId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isTransfer: false }) }),
+        fetch(`${BASE}api/transactions/${inId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isTransfer: false }) }),
+      ]);
+      queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+      refreshGrouped();
+      toast({ title: "Moved to transactions", description: "Both legs reclassified as regular transactions" });
+    } catch {
+      toast({ title: "Failed to update", variant: "destructive" });
+    }
   };
 
   const markAsRecurring = (id: string, current: boolean) => {
@@ -641,93 +707,85 @@ export default function Transactions() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-card border border-card-border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Date</th>
-                <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Description</th>
-                <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Account</th>
-                <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">
-                  Category
-                  <span className="ml-1 text-muted-foreground/40 normal-case font-normal">(click to edit)</span>
-                </th>
-                <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Flags</th>
-                <th className="text-right py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Amount</th>
-                <th className="text-right py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.isLoading ? (
-                [...Array(8)].map((_, i) => (
-                  <tr key={i} className="border-b border-border">
-                    {[...Array(7)].map((_, j) => (
-                      <td key={j} className="py-2.5 px-3"><div className="h-3 bg-muted rounded animate-pulse" /></td>
-                    ))}
+      {/* ── Transactions tab table ── */}
+      {activeTab === "transactions" && (
+        <>
+          <div className="bg-card border border-card-border rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Date</th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Description</th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Account</th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">
+                      Category
+                      <span className="ml-1 text-muted-foreground/40 normal-case font-normal">(click to edit)</span>
+                    </th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Flags</th>
+                    <th className="text-right py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Amount</th>
+                    <th className="text-right py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Actions</th>
                   </tr>
-                ))
-              ) : (transactions.data?.transactions ?? []).length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                    No transactions found. Import a Frollo CSV to get started.
-                  </td>
-                </tr>
-              ) : (
-                (transactions.data?.transactions ?? []).map((tx) => (
-                  <tr key={tx.id} className="border-b border-border hover:bg-muted/30 transition-colors">
-                    <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
-                    <td className="py-2.5 px-3 max-w-[200px]">
-                      <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
-                      {tx.merchantName && tx.merchantName !== "Unknown" && (
-                        <p className="text-muted-foreground text-xs">{tx.merchantName}</p>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">
-                      <button
-                        className="truncate max-w-[120px] text-left hover:text-primary transition-colors block"
-                        title={`Filter by ${tx.accountName}`}
-                        onClick={() => activeTab === "transactions" && (setAccountName(tx.accountName), setPage(1))}
-                      >
-                        {tx.accountName}
-                      </button>
-                      <p className="text-muted-foreground/60">{tx.providerName}</p>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <div className="flex items-center gap-1">
-                        <CategoryPicker
-                          txId={tx.id}
-                          currentCategory={tx.userCategory ?? tx.categoryName ?? null}
-                          allCategories={allCategories}
-                          onDone={(newCat, oldCat) => handleCategoryChanged(tx.id, newCat, oldCat)}
-                        />
-                        {tx.userCategory && tx.userCategory !== tx.categoryName && (
-                          <span className="text-xs text-primary" title={`Original: ${tx.categoryName}`}>✎</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <div className="flex gap-1 flex-wrap">
-                        {tx.isRecurring && <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded text-xs">Recurring</span>}
-                        <span className="text-xs text-muted-foreground/50">{tx.transactionType}</span>
-                      </div>
-                    </td>
-                    <td className={`py-2.5 px-3 text-right font-semibold tabular-nums whitespace-nowrap ${tx.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
-                      {tx.creditDebit === "debit" ? "-" : "+"}{formatCurrency(tx.amount)}
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <div className="flex gap-1 justify-end">
-                        {activeTab === "transfers" ? (
+                </thead>
+                <tbody>
+                  {transactions.isLoading ? (
+                    [...Array(8)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        {[...Array(7)].map((_, j) => (
+                          <td key={j} className="py-2.5 px-3"><div className="h-3 bg-muted rounded animate-pulse" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : (transactions.data?.transactions ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                        No transactions found. Import a Frollo CSV to get started.
+                      </td>
+                    </tr>
+                  ) : (
+                    (transactions.data?.transactions ?? []).map((tx) => (
+                      <tr key={tx.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                        <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
+                        <td className="py-2.5 px-3 max-w-[200px]">
+                          <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
+                          {tx.merchantName && tx.merchantName !== "Unknown" && (
+                            <p className="text-muted-foreground text-xs">{tx.merchantName}</p>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">
                           <button
-                            onClick={() => markAsTransfer(tx.id, tx.isTransfer)}
-                            className="text-xs px-2.5 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1"
-                            title="Move this back to regular transactions"
+                            className="truncate max-w-[120px] text-left hover:text-primary transition-colors block"
+                            title={`Filter by ${tx.accountName}`}
+                            onClick={() => { setAccountName(tx.accountName); setPage(1); }}
                           >
-                            <X className="w-3 h-3" /> Not a transfer
+                            {tx.accountName}
                           </button>
-                        ) : (
-                          <>
+                          <p className="text-muted-foreground/60">{tx.providerName}</p>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-1">
+                            <CategoryPicker
+                              txId={tx.id}
+                              currentCategory={tx.userCategory ?? tx.categoryName ?? null}
+                              allCategories={allCategories}
+                              onDone={(newCat, oldCat) => handleCategoryChanged(tx.id, newCat, oldCat)}
+                            />
+                            {tx.userCategory && tx.userCategory !== tx.categoryName && (
+                              <span className="text-xs text-primary" title={`Original: ${tx.categoryName}`}>✎</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex gap-1 flex-wrap">
+                            {tx.isRecurring && <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded text-xs">Recurring</span>}
+                            <span className="text-xs text-muted-foreground/50">{tx.transactionType}</span>
+                          </div>
+                        </td>
+                        <td className={`py-2.5 px-3 text-right font-semibold tabular-nums whitespace-nowrap ${tx.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
+                          {tx.creditDebit === "debit" ? "-" : "+"}{formatCurrency(tx.amount)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <div className="flex gap-1 justify-end">
                             <button
                               onClick={() => markAsTransfer(tx.id, tx.isTransfer)}
                               className="text-xs px-2 py-1 rounded border transition-colors border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
@@ -742,31 +800,139 @@ export default function Transactions() {
                             >
                               <Clock className="w-3 h-3" />
                             </button>
-                          </>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Page {page} of {totalPages}</span>
+              <div className="flex gap-1">
+                <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Transfers tab grouped view ── */}
+      {activeTab === "transfers" && (
+        <>
+          {/* Summary bar */}
+          {groupedTransfers && (
+            <div className="flex items-center gap-5 text-sm text-muted-foreground">
+              <span>
+                <span className="text-foreground font-medium">{groupedTransfers.totalPairs}</span> matched pairs
+              </span>
+              {groupedTransfers.totalUnpaired > 0 && (
+                <span className="flex items-center gap-1.5 text-amber-400">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span className="font-medium">{groupedTransfers.totalUnpaired}</span> unpaired
+                </span>
+              )}
+              <button onClick={refreshGrouped} className="ml-auto text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
+                <RefreshCw className="w-3 h-3" /> Refresh
+              </button>
+            </div>
+          )}
+
+          {/* Loading skeleton */}
+          {groupedLoading && (
+            <div className="space-y-2">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="h-14 bg-muted rounded-lg animate-pulse" />
+              ))}
+            </div>
+          )}
+
+          {/* Paired transfers */}
+          {!groupedLoading && groupedTransfers && groupedTransfers.pairs.length > 0 && (
+            <div className="space-y-1.5">
+              {groupedTransfers.pairs.map((pair) => (
+                <div key={pair.id} className="bg-card border border-border rounded-lg px-4 py-3 flex items-center justify-between gap-4 hover:border-border/80 transition-colors">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">{pair.date}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 text-sm font-medium">
+                        <span className="truncate max-w-[130px] text-muted-foreground" title={pair.outgoing.accountName}>{pair.outgoing.accountName}</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
+                        <span className="truncate max-w-[130px]" title={pair.incoming.accountName}>{pair.incoming.accountName}</span>
+                        {pair.daysApart > 0 && (
+                          <span className="text-xs text-muted-foreground/50 flex-shrink-0 font-normal">{pair.daysApart}d apart</span>
                         )}
                       </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                      <p className="text-xs text-muted-foreground/55 truncate mt-0.5">
+                        {(pair.outgoing.userDescription ?? pair.outgoing.description).substring(0, 38)} ↔ {(pair.incoming.userDescription ?? pair.incoming.description).substring(0, 38)}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="text-sm font-semibold tabular-nums">{formatCurrency(pair.amount)}</span>
+                    <button
+                      onClick={() => unmarkPair(pair.outgoing.id, pair.incoming.id)}
+                      className="text-xs px-2.5 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1"
+                      title="Mark both legs as regular transactions"
+                    >
+                      <X className="w-3 h-3" /> Not transfers
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>Page {page} of {totalPages}</span>
-          <div className="flex gap-1">
-            <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </Button>
-            <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-        </div>
+          {/* Unpaired transfers */}
+          {!groupedLoading && groupedTransfers && groupedTransfers.unpaired.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2 mt-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-medium text-amber-400">
+                  {groupedTransfers.totalUnpaired} unpaired — no matching leg found within 3 days
+                </h3>
+              </div>
+              <div className="space-y-1">
+                {groupedTransfers.unpaired.map((tx) => (
+                  <div key={tx.id} className="bg-amber-500/5 border border-amber-500/20 rounded-lg px-4 py-3 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">{tx.transactionDate}</span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{tx.userDescription ?? tx.description}</p>
+                        <p className="text-xs text-muted-foreground/70 truncate">{tx.accountName} · {tx.transactionType}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className={`text-sm font-semibold tabular-nums ${tx.creditDebit === "credit" ? "text-emerald-400" : ""}`}>
+                        {tx.creditDebit === "debit" ? "-" : "+"}{formatCurrency(tx.amount)}
+                      </span>
+                      <button
+                        onClick={() => markAsTransfer(tx.id, true)}
+                        className="text-xs px-2.5 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1"
+                        title="Move back to regular transactions"
+                      >
+                        <X className="w-3 h-3" /> Not a transfer
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!groupedLoading && groupedTransfers && groupedTransfers.totalPairs === 0 && groupedTransfers.totalUnpaired === 0 && (
+            <p className="text-center text-muted-foreground py-12 text-sm">No transfers found.</p>
+          )}
+        </>
       )}
 
       {/* Bulk apply dialog */}
