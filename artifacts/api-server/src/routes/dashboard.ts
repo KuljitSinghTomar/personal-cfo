@@ -387,7 +387,19 @@ router.get("/dashboard/forecast", async (req, res) => {
       ? incomeValues.reduce((s, v) => s + v, 0) / incomeValues.length
       : currentMonthIncome;
 
-    const dailySpendRate = dayOfMonth > 0 ? currentMonthSpend / dayOfMonth : 0;
+    const monthlyExpenses: Record<string, number> = {};
+    for (const r of historicalRows) {
+      if (!r.transactionDate || r.creditDebit !== "debit") continue;
+      const month = r.transactionDate.substring(0, 7);
+      monthlyExpenses[month] = (monthlyExpenses[month] ?? 0) + parseFloat(r.amount);
+    }
+    const expenseValues = Object.values(monthlyExpenses);
+    const avgMonthlyExpense = expenseValues.length > 0
+      ? expenseValues.reduce((s, v) => s + v, 0) / expenseValues.length
+      : currentMonthSpend;
+
+    // Use the greater of current-month-rate or historical average for projection
+    const dailySpendRate = dayOfMonth > 0 ? Math.max(currentMonthSpend / dayOfMonth, avgMonthlyExpense / daysInMonth) : avgMonthlyExpense / daysInMonth;
     const projectedMonthSpend = currentMonthSpend + dailySpendRate * daysRemaining;
     const projectedSavings = avgMonthlyIncome - projectedMonthSpend;
 
@@ -399,16 +411,6 @@ router.get("/dashboard/forecast", async (req, res) => {
       onTrackMessage = `At this rate, you will overspend by $${Math.abs(surplusCurrentMonth).toFixed(0)} this month`;
     }
 
-    const monthlyExpenses: Record<string, number> = {};
-    for (const r of historicalRows) {
-      if (!r.transactionDate || r.creditDebit !== "debit") continue;
-      const month = r.transactionDate.substring(0, 7);
-      monthlyExpenses[month] = (monthlyExpenses[month] ?? 0) + parseFloat(r.amount);
-    }
-    const expenseValues = Object.values(monthlyExpenses);
-    const avgMonthlyExpense = expenseValues.length > 0
-      ? expenseValues.reduce((s, v) => s + v, 0) / expenseValues.length
-      : currentMonthSpend;
     const monthlySurplus = avgMonthlyIncome - avgMonthlyExpense;
     const runwayMonths = monthlySurplus > 0 ? 999 : (avgMonthlyIncome > 0 ? avgMonthlyIncome / Math.abs(monthlySurplus) : 0);
 
