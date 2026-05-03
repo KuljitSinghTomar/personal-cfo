@@ -59,6 +59,18 @@ function getMonthDateRange(month: string) {
   return { startDate: start, endDate: end };
 }
 
+function getPrevMonthKey(month: string) {
+  const [year, m] = month.split("-").map(Number);
+  const d = new Date(year!, m! - 1, 1);
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function pctChange(current: number, prev: number): number | undefined {
+  if (!prev || prev === 0) return undefined;
+  return ((current - prev) / Math.abs(prev)) * 100;
+}
+
 function InsightIcon({ type }: { type: string }) {
   if (type === "warning") return <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />;
   if (type === "positive") return <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />;
@@ -407,6 +419,18 @@ function DrillDownSheet({
 
 // ── Clickable metric card ──────────────────────────────────────────────────
 
+function ChangePill({ change, invert = false }: { change: number; invert?: boolean }) {
+  const isUp = change > 0;
+  const isGood = invert ? !isUp : isUp;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+      isGood ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+    }`}>
+      {isUp ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%
+    </span>
+  );
+}
+
 function MetricCard({
   label,
   value,
@@ -414,6 +438,8 @@ function MetricCard({
   positive,
   onClick,
   hint,
+  change,
+  invertChange,
 }: {
   label: string;
   value: string;
@@ -421,6 +447,8 @@ function MetricCard({
   positive?: boolean;
   onClick?: () => void;
   hint?: string;
+  change?: number;
+  invertChange?: boolean;
 }) {
   return (
     <div
@@ -439,7 +467,11 @@ function MetricCard({
       <span className={`text-2xl font-bold tabular-nums ${positive === true ? "text-emerald-400" : positive === false ? "text-red-400" : "text-foreground"}`}>
         {value}
       </span>
-      {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
+      <div className="flex items-center gap-1.5 min-h-[18px]">
+        {change !== undefined && <ChangePill change={change} invert={invertChange} />}
+        {change !== undefined && <span className="text-[10px] text-muted-foreground/50">vs last month</span>}
+        {!change && sub && <span className="text-xs text-muted-foreground">{sub}</span>}
+      </div>
       {onClick && (
         <span className="text-xs text-muted-foreground/50 group-hover:text-primary/70 transition-colors">
           Click to drill in →
@@ -461,6 +493,16 @@ export default function Dashboard() {
 
   const summary = useGetDashboardSummary(summaryParams, {
     query: { queryKey: getGetDashboardSummaryQueryKey(summaryParams) },
+  });
+
+  const prevMonthKey = isMonthly ? getPrevMonthKey(selectedMonth) : null;
+  const prevMonthRange = prevMonthKey ? getMonthDateRange(prevMonthKey) : null;
+  const prevSummaryParams = prevMonthRange ?? {};
+  const prevSummary = useGetDashboardSummary(prevSummaryParams, {
+    query: {
+      queryKey: getGetDashboardSummaryQueryKey(prevSummaryParams),
+      enabled: !!prevMonthRange,
+    },
   });
   const cashflow = useGetCashflow({ months: 12 }, {
     query: { queryKey: getGetCashflowQueryKey({ months: 12 }) },
@@ -574,6 +616,7 @@ export default function Dashboard() {
             positive={true}
             onClick={() => openDrill("income")}
             hint="Click to see income by category"
+            change={isMonthly && prevSummary.data ? pctChange(s?.totalIncome ?? 0, prevSummary.data.totalIncome) : undefined}
           />
           <MetricCard
             label="Total Expenses"
@@ -581,17 +624,21 @@ export default function Dashboard() {
             positive={false}
             onClick={() => openDrill("expenses")}
             hint="Click to see expenses by category"
+            change={isMonthly && prevSummary.data ? pctChange(s?.totalExpenses ?? 0, prevSummary.data.totalExpenses) : undefined}
+            invertChange
           />
           <MetricCard
             label="Net Cashflow"
             value={formatCurrency(s?.netCashflow ?? 0)}
             positive={(s?.netCashflow ?? 0) >= 0}
+            change={isMonthly && prevSummary.data ? pctChange(s?.netCashflow ?? 0, prevSummary.data.netCashflow) : undefined}
           />
           <MetricCard
             label="Savings Rate"
             value={`${(s?.savingsRate ?? 0).toFixed(1)}%`}
             sub={`${s?.transfersFiltered ?? 0} transfers filtered`}
             positive={(s?.savingsRate ?? 0) >= 15}
+            change={isMonthly && prevSummary.data ? pctChange(s?.savingsRate ?? 0, prevSummary.data.savingsRate) : undefined}
           />
         </div>
       )}
