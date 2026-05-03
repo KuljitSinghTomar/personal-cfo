@@ -11,6 +11,7 @@ import AiAdvisor from "@/pages/ai-advisor";
 import Scenarios from "@/pages/scenarios";
 import Budget from "@/pages/budget";
 import NetWorth from "@/pages/net-worth";
+import CategoryRules from "@/pages/category-rules";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,7 @@ function Router() {
         <Route path="/net-worth" component={NetWorth} />
         <Route path="/ai-advisor" component={AiAdvisor} />
         <Route path="/scenarios" component={Scenarios} />
+        <Route path="/category-rules" component={CategoryRules} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
