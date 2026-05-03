@@ -14,21 +14,8 @@ import { autoGenerateBudgetGoals } from "./budget";
 import { syncNetWorthFromTransactions } from "./net-worth";
 
 // ── Transfer pair-matching engine ─────────────────────────────────────────
-//
-// A transaction is an internal transfer ONLY when its exact opposite exists:
-//   - Same amount (absolute)
-//   - Same or nearby date (≤ 2 calendar days)
-//   - Different account number
-//   - At least one side flagged by transaction_type OR category heuristic
-//
-// Steps:
-//   1. Collect all "candidates" (transfer_type OR transfer_category)
-//   2. Reset all candidates to is_transfer = false
-//   3. Greedily match (debit, credit) pairs
-//   4. Mark each matched pair as is_transfer = true
 
 export async function redetectTransfers(log?: any): Promise<{ matched: number; reset: number }> {
-  // 1. Identify candidates by transaction_type or category heuristic
   const candidates = await db
     .select({
       id: transactionsTable.id,
@@ -48,28 +35,17 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
       )
     );
 
-  if (candidates.length === 0) {
-    return { matched: 0, reset: 0 };
-  }
+  if (candidates.length === 0) return { matched: 0, reset: 0 };
 
   const candidateIds = candidates.map((c) => c.id);
+  await db.update(transactionsTable).set({ isTransfer: false }).where(inArray(transactionsTable.id, candidateIds));
 
-  // 2. Reset all candidate flags — none are transfers until a pair is confirmed
-  await db
-    .update(transactionsTable)
-    .set({ isTransfer: false })
-    .where(inArray(transactionsTable.id, candidateIds));
-
-  // 3. Greedily match (debit, credit) pairs
   const debits = candidates.filter((c) => c.creditDebit === "debit");
   const credits = candidates.filter((c) => c.creditDebit === "credit");
-
-  // Index credits by amount for fast lookup
   const creditsByAmount = new Map<string, typeof credits>();
   for (const c of credits) {
-    const key = c.amount; // stored as abs value string e.g. "150.00"
-    if (!creditsByAmount.has(key)) creditsByAmount.set(key, []);
-    creditsByAmount.get(key)!.push(c);
+    if (!creditsByAmount.has(c.amount)) creditsByAmount.set(c.amount, []);
+    creditsByAmount.get(c.amount)!.push(c);
   }
 
   const matchedIds: string[] = [];
@@ -80,35 +56,121 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
     for (const credit of potentialCredits) {
       if (usedCreditIds.has(credit.id)) continue;
       if (debit.accountNumber === credit.accountNumber) continue;
-
-      // Check date proximity (≤ 2 calendar days)
-      const debitDate = new Date(debit.transactionDate!);
-      const creditDate = new Date(credit.transactionDate!);
       const daysDiff = Math.abs(
-        (debitDate.getTime() - creditDate.getTime()) / (1000 * 60 * 60 * 24)
+        (new Date(debit.transactionDate!).getTime() - new Date(credit.transactionDate!).getTime()) / (1000 * 60 * 60 * 24)
       );
       if (daysDiff > 2) continue;
-
-      // Pair confirmed — mark both
       matchedIds.push(debit.id, credit.id);
       usedCreditIds.add(credit.id);
       break;
     }
   }
 
-  // 4. Mark matched pairs as transfers
   if (matchedIds.length > 0) {
-    await db
-      .update(transactionsTable)
-      .set({ isTransfer: true })
-      .where(inArray(transactionsTable.id, matchedIds));
+    await db.update(transactionsTable).set({ isTransfer: true }).where(inArray(transactionsTable.id, matchedIds));
   }
 
   log?.info({ candidates: candidateIds.length, matched: matchedIds.length }, "Transfer re-detection complete");
   return { matched: matchedIds.length / 2, reset: candidateIds.length };
 }
 
+// ── Description token extraction ──────────────────────────────────────────
+
+const NOISE_WORDS = new Set([
+  "pos", "pur", "purchase", "authorisation", "authorization", "auth",
+  "debit", "credit", "payment", "direct", "eftpos", "visa", "mastercard",
+  "amex", "ach", "fee", "charge", "transaction", "transfer", "deposit",
+  "withdrawal", "atm", "card", "online", "internet", "bpay", "paypal",
+  "ref", "pay", "pmt", "aus", "pty", "ltd", "xxxx", "www", "com",
+  "au", "net", "org", "the", "and", "for", "via",
+]);
+
+export function extractDescriptionTokens(description: string): string[] {
+  return description
+    .split(/[\s\-*\/|_,.'&+@#!]+/)
+    .map((t) => t.trim())
+    .filter((t) => {
+      const lower = t.toLowerCase();
+      return (
+        t.length >= 3 &&
+        !NOISE_WORDS.has(lower) &&
+        !/^\d+$/.test(t) &&       // not purely numeric
+        !/^x+$/i.test(t) &&       // not masking chars
+        !/^\d{4}x+$/i.test(t)     // not card-number suffixes
+      );
+    })
+    .filter((t, i, arr) => arr.findIndex((x) => x.toLowerCase() === t.toLowerCase()) === i);
+}
+
+// ── Criteria-based query builder ──────────────────────────────────────────
+
+export type CriterionType = "merchant" | "descriptionToken" | "account" | "amount" | "creditDebit";
+
+export interface MatchCriterion {
+  type: CriterionType;
+  value: string;
+}
+
+function buildCriteriaConditions(criteria: MatchCriterion[], excludeId: string) {
+  const conditions: ReturnType<typeof eq>[] = [ne(transactionsTable.id, excludeId) as any];
+
+  for (const c of criteria) {
+    switch (c.type) {
+      case "merchant":
+        conditions.push(ilike(transactionsTable.merchantName, c.value) as any);
+        break;
+      case "descriptionToken":
+        conditions.push(ilike(transactionsTable.description, `%${c.value}%`) as any);
+        break;
+      case "account":
+        conditions.push(ilike(transactionsTable.accountName, `%${c.value}%`) as any);
+        break;
+      case "amount":
+        conditions.push(eq(transactionsTable.amount, c.value) as any);
+        break;
+      case "creditDebit":
+        conditions.push(eq(transactionsTable.creditDebit, c.value as "credit" | "debit") as any);
+        break;
+    }
+  }
+
+  return and(...conditions);
+}
+
+async function runSimilarQuery(criteria: MatchCriterion[], excludeId: string) {
+  const where = buildCriteriaConditions(criteria, excludeId);
+
+  const rows = await db
+    .select()
+    .from(transactionsTable)
+    .where(where)
+    .orderBy(desc(transactionsTable.transactionDate));
+
+  const totalAmount = rows.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
+  const dates = rows.map((t) => t.transactionDate!).sort();
+  const categories = [...new Set(rows.map((t) => t.userCategory ?? t.categoryName).filter(Boolean))];
+  const samples = rows.slice(0, 5).map((t) => ({
+    id: t.id,
+    description: t.userDescription ?? t.description,
+    amount: parseFloat(t.amount),
+    creditDebit: t.creditDebit,
+    transactionDate: t.transactionDate,
+    category: t.userCategory ?? t.categoryName ?? null,
+  }));
+
+  return {
+    count: rows.length,
+    totalAmount,
+    earliestDate: dates[0] ?? null,
+    latestDate: dates[dates.length - 1] ?? null,
+    categories,
+    samples,
+  };
+}
+
 const router = Router();
+
+// ── List transactions ──────────────────────────────────────────────────────
 
 router.get("/transactions", async (req, res) => {
   try {
@@ -116,50 +178,33 @@ router.get("/transactions", async (req, res) => {
     const { page, limit, startDate, endDate, category, accountName, search, creditDebit, isTransfer, isRecurring } = query;
 
     const conditions = [];
-
     if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
     if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
-    if (category) conditions.push(
-      or(
-        ilike(transactionsTable.categoryName, `%${category}%`),
-        ilike(transactionsTable.userCategory, `%${category}%`)
-      )
-    );
+    if (category) conditions.push(or(ilike(transactionsTable.categoryName, `%${category}%`), ilike(transactionsTable.userCategory, `%${category}%`)));
     if (accountName) conditions.push(ilike(transactionsTable.accountName, `%${accountName}%`));
     if (creditDebit) conditions.push(eq(transactionsTable.creditDebit, creditDebit));
     if (isTransfer !== undefined) conditions.push(eq(transactionsTable.isTransfer, isTransfer));
     if (isRecurring !== undefined) conditions.push(eq(transactionsTable.isRecurring, isRecurring));
     if (search) {
-      conditions.push(
-        or(
-          ilike(transactionsTable.description, `%${search}%`),
-          ilike(transactionsTable.userDescription, `%${search}%`),
-          ilike(transactionsTable.merchantName, `%${search}%`)
-        )
-      );
+      conditions.push(or(
+        ilike(transactionsTable.description, `%${search}%`),
+        ilike(transactionsTable.userDescription, `%${search}%`),
+        ilike(transactionsTable.merchantName, `%${search}%`)
+      ));
     }
 
     const where = conditions.length > 0 ? and(...conditions) : undefined;
-
     const [countResult, rows] = await Promise.all([
       db.select({ count: sql<number>`count(*)` }).from(transactionsTable).where(where),
-      db.select().from(transactionsTable)
-        .where(where)
-        .orderBy(desc(transactionsTable.transactionDate))
-        .limit(limit)
-        .offset((page - 1) * limit),
+      db.select().from(transactionsTable).where(where).orderBy(desc(transactionsTable.transactionDate)).limit(limit).offset((page - 1) * limit),
     ]);
 
-    const total = Number(countResult[0]?.count ?? 0);
-
-    const transactions = rows.map(serializeTransaction);
-
     res.json({
-      transactions,
-      total,
+      transactions: rows.map(serializeTransaction),
+      total: Number(countResult[0]?.count ?? 0),
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(Number(countResult[0]?.count ?? 0) / limit),
     });
   } catch (err) {
     req.log.error({ err }, "Failed to list transactions");
@@ -167,22 +212,14 @@ router.get("/transactions", async (req, res) => {
   }
 });
 
+// ── Import CSV ─────────────────────────────────────────────────────────────
+
 router.post("/transactions/import", async (req, res) => {
   try {
     const body = ImportTransactionsBody.parse(req.body);
-    const { csvContent } = body;
+    const records = parse(body.csvContent, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
 
-    const records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-    }) as Record<string, string>[];
-
-    // Load all active category rules once before the loop
-    const activeRules = await db
-      .select()
-      .from(categoryRulesTable)
-      .where(eq(categoryRulesTable.isActive, true));
+    const activeRules = await db.select().from(categoryRulesTable).where(eq(categoryRulesTable.isActive, true));
 
     function applyRules(merchantName: string | null, description: string, categoryName: string | null): string | null {
       for (const rule of activeRules) {
@@ -198,10 +235,7 @@ router.post("/transactions/import", async (req, res) => {
       return null;
     }
 
-    let imported = 0;
-    let skipped = 0;
-    let updated = 0;
-    let errors = 0;
+    let imported = 0, skipped = 0, updated = 0, errors = 0;
 
     for (const row of records) {
       try {
@@ -210,27 +244,21 @@ router.post("/transactions/import", async (req, res) => {
 
         const rawAmount = parseFloat(row["amount"] ?? "0");
         const creditDebit = row["credit_debit"] === "credit" ? "credit" : "debit";
-
         const included = row["included"] !== "false";
-
         const userTagsRaw = row["user_tags"] ?? "";
         const userTags = userTagsRaw ? userTagsRaw.replace(/^"|"$/g, "").split(",").filter(Boolean) : [];
-
         const isTransferType = row["transaction_type"] === "transfer_incoming" || row["transaction_type"] === "transfer_outgoing";
         const isTransferCategory = (row["category_name"] ?? "").toLowerCase().includes("transfer") ||
           (row["category_name"] ?? "").toLowerCase().includes("credit card payment");
+        const merchantName = row["merchant_name"] || null;
+        const description = row["description"] ?? "";
+        const categoryName = row["category_name"] || null;
 
         const existingRows = await db
           .select({ id: transactionsTable.id, userCategory: transactionsTable.userCategory })
           .from(transactionsTable)
           .where(eq(transactionsTable.transactionId, transactionId))
           .limit(1);
-
-        const existingRow = existingRows[0];
-
-        const merchantName = row["merchant_name"] || null;
-        const description = row["description"] ?? "";
-        const categoryName = row["category_name"] || null;
 
         const txData = {
           transactionId,
@@ -256,29 +284,20 @@ router.post("/transactions/import", async (req, res) => {
           included,
         };
 
+        const existingRow = existingRows[0];
         if (existingRow) {
-          // Preserve existing userCategory — never overwrite a user's manual categorisation on re-import
           await db.update(transactionsTable)
             .set({ ...txData, userCategory: existingRow.userCategory, updatedAt: new Date() })
             .where(eq(transactionsTable.transactionId, transactionId));
           updated++;
         } else {
-          // For new transactions: apply category rules
           const ruleCategory = applyRules(merchantName, description, categoryName);
-          await db.insert(transactionsTable).values({
-            id: randomUUID(),
-            ...txData,
-            userCategory: ruleCategory,
-          });
+          await db.insert(transactionsTable).values({ id: randomUUID(), ...txData, userCategory: ruleCategory });
           imported++;
         }
-      } catch (rowErr) {
-        errors++;
-      }
+      } catch { errors++; }
     }
 
-    // Re-detect transfers using pair-matching (synchronous — must happen before response
-    // so callers immediately see correct is_transfer flags)
     let transfersDetected = 0;
     try {
       const result = await redetectTransfers(req.log);
@@ -287,20 +306,11 @@ router.post("/transactions/import", async (req, res) => {
       req.log.warn({ err: e }, "Transfer re-detection failed (non-fatal)");
     }
 
-    // Sync net worth derived balances (fire-and-forget)
-    syncNetWorthFromTransactions(req.log).catch((e) => {
-      req.log.warn({ err: e }, "Net worth sync failed after import");
-    });
-    // Auto-generate budget goals from updated transaction history (fire-and-forget)
-    autoGenerateBudgetGoals(req.log).catch((e) => {
-      req.log.warn({ err: e }, "Auto-generate budgets failed after import (non-fatal)");
-    });
+    syncNetWorthFromTransactions(req.log).catch((e) => req.log.warn({ err: e }, "Net worth sync failed"));
+    autoGenerateBudgetGoals(req.log).catch((e) => req.log.warn({ err: e }, "Auto-generate budgets failed"));
 
     res.json({
-      imported,
-      skipped,
-      updated,
-      errors,
+      imported, skipped, updated, errors,
       transferPairsDetected: transfersDetected,
       message: `Imported ${imported}, updated ${updated}, skipped ${skipped}${transfersDetected > 0 ? `, ${transfersDetected} transfer pairs detected` : ""}`,
     });
@@ -310,40 +320,25 @@ router.post("/transactions/import", async (req, res) => {
   }
 });
 
-// ── Manual re-detect endpoint ──────────────────────────────────────────────
+// ── Re-detect transfers ────────────────────────────────────────────────────
 
 router.post("/transactions/redetect-transfers", async (req, res) => {
   try {
     const result = await redetectTransfers(req.log);
-    res.json({
-      matched: result.matched,
-      reset: result.reset,
-      message: `Re-detection complete: ${result.matched} transfer pairs confirmed from ${result.reset} candidates`,
-    });
+    res.json({ matched: result.matched, reset: result.reset, message: `Re-detection complete: ${result.matched} transfer pairs confirmed from ${result.reset} candidates` });
   } catch (err) {
     req.log.error({ err }, "Failed to re-detect transfers");
     res.status(500).json({ error: "Failed to re-detect transfers" });
   }
 });
 
-// ── Distinct categories (for pickers) ─────────────────────────────────────
+// ── Distinct categories ────────────────────────────────────────────────────
 
 router.get("/transactions/categories", async (req, res) => {
   try {
-    const rows = await db
-      .selectDistinct({ category: transactionsTable.categoryName })
-      .from(transactionsTable)
-      .where(sql`${transactionsTable.categoryName} is not null`)
-      .orderBy(transactionsTable.categoryName);
-    const userRows = await db
-      .selectDistinct({ category: transactionsTable.userCategory })
-      .from(transactionsTable)
-      .where(sql`${transactionsTable.userCategory} is not null`)
-      .orderBy(transactionsTable.userCategory);
-    const all = [...new Set([
-      ...rows.map((r) => r.category!),
-      ...userRows.map((r) => r.category!),
-    ])].sort();
+    const rows = await db.selectDistinct({ category: transactionsTable.categoryName }).from(transactionsTable).where(sql`${transactionsTable.categoryName} is not null`).orderBy(transactionsTable.categoryName);
+    const userRows = await db.selectDistinct({ category: transactionsTable.userCategory }).from(transactionsTable).where(sql`${transactionsTable.userCategory} is not null`).orderBy(transactionsTable.userCategory);
+    const all = [...new Set([...rows.map((r) => r.category!), ...userRows.map((r) => r.category!)])].sort();
     res.json({ categories: all });
   } catch (err) {
     req.log.error({ err }, "Failed to list categories");
@@ -351,67 +346,38 @@ router.get("/transactions/categories", async (req, res) => {
   }
 });
 
-// ── Similar transactions ───────────────────────────────────────────────────
+// ── Similar transactions (with criteria extraction) ────────────────────────
 
 router.get("/transactions/:id/similar", async (req, res) => {
   try {
     const { id } = req.params;
-
-    const [source] = await db
-      .select()
-      .from(transactionsTable)
-      .where(eq(transactionsTable.id, id))
-      .limit(1);
-
+    const [source] = await db.select().from(transactionsTable).where(eq(transactionsTable.id, id)).limit(1);
     if (!source) return res.status(404).json({ error: "Transaction not found" });
 
-    let matchedOn: "merchant" | "description" = "description";
-    let matchValue = "";
-    let conditions: any[] = [ne(transactionsTable.id, id)];
+    const descriptionTokens = extractDescriptionTokens(source.description);
 
-    if (source.merchantName && source.merchantName !== "Unknown" && source.merchantName.trim() !== "") {
-      matchedOn = "merchant";
-      matchValue = source.merchantName;
-      conditions.push(ilike(transactionsTable.merchantName, source.merchantName));
-    } else {
-      matchedOn = "description";
-      matchValue = source.description;
-      // Match by first 30 chars of description
-      const prefix = source.description.substring(0, 30).trim();
-      conditions.push(ilike(transactionsTable.description, `${prefix}%`));
-    }
+    // Build the default criteria (auto-select best identifiers)
+    const hasMerchant = source.merchantName && source.merchantName !== "Unknown" && source.merchantName.trim() !== "";
+    const defaultCriteria: MatchCriterion[] = hasMerchant
+      ? [{ type: "merchant", value: source.merchantName! }]
+      : descriptionTokens.slice(0, 2).map((t) => ({ type: "descriptionToken" as CriterionType, value: t }));
 
-    const similar = await db
-      .select()
-      .from(transactionsTable)
-      .where(and(...conditions))
-      .orderBy(desc(transactionsTable.transactionDate));
-
-    if (similar.length === 0) {
-      return res.json({ count: 0, totalAmount: 0, matchedOn, matchValue, samples: [], categories: [] });
-    }
-
-    const totalAmount = similar.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
-    const dates = similar.map((t) => t.transactionDate!).sort();
-    const categories = [...new Set(similar.map((t) => t.userCategory ?? t.categoryName).filter(Boolean))];
-    const samples = similar.slice(0, 5).map((t) => ({
-      id: t.id,
-      description: t.userDescription ?? t.description,
-      amount: parseFloat(t.amount),
-      creditDebit: t.creditDebit,
-      transactionDate: t.transactionDate,
-      category: t.userCategory ?? t.categoryName ?? null,
-    }));
+    const results = defaultCriteria.length > 0
+      ? await runSimilarQuery(defaultCriteria, id)
+      : { count: 0, totalAmount: 0, earliestDate: null, latestDate: null, categories: [], samples: [] };
 
     res.json({
-      count: similar.length,
-      totalAmount,
-      earliestDate: dates[0],
-      latestDate: dates[dates.length - 1],
-      matchedOn,
-      matchValue,
-      categories,
-      samples,
+      source: {
+        merchant: hasMerchant ? source.merchantName : null,
+        description: source.description,
+        descriptionTokens,
+        account: source.accountName,
+        amount: source.amount,
+        creditDebit: source.creditDebit,
+        transactionType: source.transactionType || null,
+      },
+      defaultCriteria,
+      results,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to find similar transactions");
@@ -419,55 +385,81 @@ router.get("/transactions/:id/similar", async (req, res) => {
   }
 });
 
+// ── Preview similar (live re-query as user changes criteria) ───────────────
+
+router.post("/transactions/preview-similar", async (req, res) => {
+  try {
+    const { txId, criteria } = req.body as { txId: string; criteria: MatchCriterion[] };
+    if (!txId || !Array.isArray(criteria)) {
+      return res.status(400).json({ error: "txId and criteria are required" });
+    }
+    const results = criteria.length > 0
+      ? await runSimilarQuery(criteria, txId)
+      : { count: 0, totalAmount: 0, earliestDate: null, latestDate: null, categories: [], samples: [] };
+    res.json(results);
+  } catch (err) {
+    req.log.error({ err }, "Failed to preview similar");
+    res.status(500).json({ error: "Failed to preview similar" });
+  }
+});
+
 // ── Bulk recategorize ─────────────────────────────────────────────────────
 
 router.post("/transactions/bulk-recategorize", async (req, res) => {
   try {
-    const { matchField, matchValue, newCategory, createRule } = req.body as {
-      matchField: "merchant" | "description";
-      matchValue: string;
+    const { txId, criteria, newCategory, createRule } = req.body as {
+      txId: string;
+      criteria: MatchCriterion[];
       newCategory: string;
       createRule: boolean;
     };
 
-    let condition: any;
-    if (matchField === "merchant") {
-      condition = ilike(transactionsTable.merchantName, matchValue);
-    } else {
-      const prefix = matchValue.substring(0, 30).trim();
-      condition = ilike(transactionsTable.description, `${prefix}%`);
+    if (!criteria || criteria.length === 0) {
+      return res.status(400).json({ error: "At least one matching criterion is required" });
     }
 
+    const where = buildCriteriaConditions(criteria, txId);
     const updated = await db
       .update(transactionsTable)
       .set({ userCategory: newCategory, updatedAt: new Date() })
-      .where(condition)
+      .where(where)
       .returning({ id: transactionsTable.id });
 
     let ruleId: string | null = null;
     if (createRule) {
-      ruleId = randomUUID();
-      await db.insert(categoryRulesTable).values({
-        id: ruleId,
-        matchPattern: matchValue,
-        matchField,
-        category: newCategory,
-        isActive: true,
-      });
+      // Pick the most specific criterion for the rule:
+      // merchant > descriptionToken > account
+      const priorityOrder: CriterionType[] = ["merchant", "descriptionToken", "account", "amount", "creditDebit"];
+      const primary = priorityOrder.map((t) => criteria.find((c) => c.type === t)).find(Boolean);
+
+      if (primary) {
+        ruleId = randomUUID();
+        const matchField = primary.type === "merchant" ? "merchant"
+          : primary.type === "account" ? "description"
+          : "description";
+        await db.insert(categoryRulesTable).values({
+          id: ruleId,
+          matchPattern: primary.value,
+          matchField,
+          category: newCategory,
+          isActive: true,
+        });
+      }
     }
 
-    res.json({ updated: updated.length, ruleCreated: createRule, ruleId });
+    res.json({ updated: updated.length, ruleCreated: createRule && !!ruleId, ruleId });
   } catch (err) {
     req.log.error({ err }, "Failed to bulk recategorize");
     res.status(500).json({ error: "Failed to bulk recategorize" });
   }
 });
 
+// ── Update transaction ────────────────────────────────────────────────────
+
 router.patch("/transactions/:id", async (req, res) => {
   try {
     const { id } = UpdateTransactionParams.parse(req.params);
     const body = UpdateTransactionBody.parse(req.body);
-
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (body.userDescription !== undefined) updateData.userDescription = body.userDescription;
     if (body.userCategory !== undefined) updateData.userCategory = body.userCategory;
@@ -477,15 +469,8 @@ router.patch("/transactions/:id", async (req, res) => {
     if (body.isRecurring !== undefined) updateData.isRecurring = body.isRecurring;
     if (body.included !== undefined) updateData.included = body.included;
 
-    const rows = await db.update(transactionsTable)
-      .set(updateData)
-      .where(eq(transactionsTable.id, id))
-      .returning();
-
-    if (!rows[0]) {
-      return res.status(404).json({ error: "Transaction not found" });
-    }
-
+    const rows = await db.update(transactionsTable).set(updateData).where(eq(transactionsTable.id, id)).returning();
+    if (!rows[0]) return res.status(404).json({ error: "Transaction not found" });
     res.json(serializeTransaction(rows[0]));
   } catch (err) {
     req.log.error({ err }, "Failed to update transaction");

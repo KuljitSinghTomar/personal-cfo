@@ -10,7 +10,7 @@ import { useSearch } from "wouter";
 import {
   Search, Upload, RefreshCw, Repeat2, Clock, X,
   ChevronLeft, ChevronRight, Shuffle, Tag, Check, ChevronsUpDown,
-  AlertTriangle, Layers,
+  AlertTriangle, Layers, Fingerprint,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -34,20 +34,35 @@ const BASE = import.meta.env.BASE_URL;
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-interface SimilarResult {
+export type CriterionType = "merchant" | "descriptionToken" | "account" | "amount" | "creditDebit";
+
+export interface MatchCriterion {
+  type: CriterionType;
+  value: string;
+}
+
+interface SourceInfo {
+  merchant: string | null;
+  description: string;
+  descriptionTokens: string[];
+  account: string;
+  amount: string;
+  creditDebit: string;
+  transactionType: string | null;
+}
+
+interface SimilarResults {
   count: number;
   totalAmount: number;
-  earliestDate: string;
-  latestDate: string;
-  matchedOn: "merchant" | "description";
-  matchValue: string;
+  earliestDate: string | null;
+  latestDate: string | null;
   categories: string[];
   samples: Array<{
     id: string;
     description: string;
     amount: number;
     creditDebit: string;
-    transactionDate: string;
+    transactionDate: string | null;
     category: string | null;
   }>;
 }
@@ -56,7 +71,274 @@ interface BulkDialogState {
   txId: string;
   oldCategory: string | null;
   newCategory: string;
-  similar: SimilarResult;
+  source: SourceInfo;
+  defaultCriteria: MatchCriterion[];
+  results: SimilarResults;
+}
+
+// ── Criterion chip ─────────────────────────────────────────────────────────
+
+function CriterionChip({
+  label,
+  sublabel,
+  selected,
+  onToggle,
+  group,
+}: {
+  label: string;
+  sublabel?: string;
+  selected: boolean;
+  onToggle: () => void;
+  group?: string;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`inline-flex flex-col items-start px-2.5 py-1.5 rounded-md border text-xs transition-all leading-tight ${
+        selected
+          ? "bg-primary/15 border-primary/50 text-primary"
+          : "bg-muted/40 border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+      }`}
+    >
+      {group && <span className="text-[10px] opacity-60 uppercase tracking-widest mb-0.5">{group}</span>}
+      <span className="font-medium">{label}</span>
+      {sublabel && <span className="text-[10px] opacity-70 truncate max-w-[120px]">{sublabel}</span>}
+    </button>
+  );
+}
+
+// ── Bulk Apply Dialog ─────────────────────────────────────────────────────
+
+function BulkApplyDialog({
+  state,
+  onClose,
+  onApply,
+}: {
+  state: BulkDialogState | null;
+  onClose: () => void;
+  onApply: (criteria: MatchCriterion[], createRule: boolean) => Promise<void>;
+}) {
+  const [selectedCriteria, setSelectedCriteria] = useState<MatchCriterion[]>([]);
+  const [results, setResults] = useState<SimilarResults | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  // Initialise when dialog opens
+  useEffect(() => {
+    if (!state) return;
+    setSelectedCriteria(state.defaultCriteria);
+    setResults(state.results);
+  }, [state]);
+
+  // Re-query when criteria change (debounced)
+  useEffect(() => {
+    if (!state || selectedCriteria.length === 0) {
+      setResults({ count: 0, totalAmount: 0, earliestDate: null, latestDate: null, categories: [], samples: [] });
+      return;
+    }
+    setPreviewLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${BASE}api/transactions/preview-similar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txId: state.txId, criteria: selectedCriteria }),
+        });
+        if (res.ok) setResults(await res.json());
+      } catch { /* ignore */ }
+      finally { setPreviewLoading(false); }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [state, selectedCriteria]);
+
+  if (!state) return null;
+
+  const { source, newCategory, oldCategory } = state;
+
+  const isCriterionSelected = (type: CriterionType, value: string) =>
+    selectedCriteria.some((c) => c.type === type && c.value.toLowerCase() === value.toLowerCase());
+
+  const toggleCriterion = (type: CriterionType, value: string) => {
+    setSelectedCriteria((prev) => {
+      const exists = prev.some((c) => c.type === type && c.value.toLowerCase() === value.toLowerCase());
+      if (exists) return prev.filter((c) => !(c.type === type && c.value.toLowerCase() === value.toLowerCase()));
+      return [...prev, { type, value }];
+    });
+  };
+
+  const handleApply = async (createRule: boolean) => {
+    if (selectedCriteria.length === 0) return;
+    setApplying(true);
+    try { await onApply(selectedCriteria, createRule); }
+    finally { setApplying(false); }
+  };
+
+  const displayCount = results?.count ?? 0;
+
+  return (
+    <Dialog open={true} onOpenChange={onClose}>
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-primary" />
+            Apply to similar transactions?
+          </DialogTitle>
+          <DialogDescription className="text-sm leading-relaxed">
+            Changed{oldCategory && <> <span className="text-amber-400">"{oldCategory}"</span> →</>}{" "}
+            <span className="text-emerald-400">"{newCategory}"</span>
+            {source.merchant && <> for <span className="font-semibold text-foreground">"{source.merchant}"</span></>}.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* ── Criteria selector ─────────────────────────────────── */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-widest">
+            <Fingerprint className="w-3 h-3" />
+            Match transactions using
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Select which data points identify these transactions. Toggle on/off to refine — results update live.
+          </p>
+
+          <div className="flex flex-wrap gap-1.5">
+            {/* Merchant */}
+            {source.merchant && (
+              <CriterionChip
+                group="Merchant"
+                label={source.merchant}
+                selected={isCriterionSelected("merchant", source.merchant)}
+                onToggle={() => toggleCriterion("merchant", source.merchant!)}
+              />
+            )}
+
+            {/* Description tokens */}
+            {source.descriptionTokens.map((token) => (
+              <CriterionChip
+                key={token}
+                group="Description"
+                label={token}
+                selected={isCriterionSelected("descriptionToken", token)}
+                onToggle={() => toggleCriterion("descriptionToken", token)}
+              />
+            ))}
+
+            {/* Account */}
+            <CriterionChip
+              group="Account"
+              label={source.account.length > 16 ? source.account.substring(0, 16) + "…" : source.account}
+              sublabel={source.account.length > 16 ? source.account : undefined}
+              selected={isCriterionSelected("account", source.account)}
+              onToggle={() => toggleCriterion("account", source.account)}
+            />
+
+            {/* Credit / Debit */}
+            <CriterionChip
+              group="Direction"
+              label={source.creditDebit === "debit" ? "Debit only" : "Credit only"}
+              selected={isCriterionSelected("creditDebit", source.creditDebit)}
+              onToggle={() => toggleCriterion("creditDebit", source.creditDebit)}
+            />
+
+            {/* Exact amount */}
+            <CriterionChip
+              group="Amount"
+              label={`$${parseFloat(source.amount).toFixed(2)}`}
+              selected={isCriterionSelected("amount", source.amount)}
+              onToggle={() => toggleCriterion("amount", source.amount)}
+            />
+          </div>
+
+          {/* Raw description for reference */}
+          <div className="bg-muted/30 rounded px-2.5 py-1.5 text-[11px] text-muted-foreground font-mono truncate" title={source.description}>
+            {source.description}
+          </div>
+        </div>
+
+        {/* ── Results preview ──────────────────────────────────── */}
+        {selectedCriteria.length === 0 ? (
+          <div className="flex items-center gap-1.5 text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded px-3 py-2">
+            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+            Select at least one criterion above to find similar transactions.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className={`grid grid-cols-3 gap-2 text-center transition-opacity ${previewLoading ? "opacity-50" : ""}`}>
+              <div className="bg-muted rounded-lg p-2.5">
+                <p className="text-lg font-bold text-foreground flex items-center justify-center gap-1">
+                  {previewLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : displayCount}
+                </p>
+                <p className="text-xs text-muted-foreground">transactions</p>
+              </div>
+              <div className="bg-muted rounded-lg p-2.5">
+                <p className="text-lg font-bold text-foreground">
+                  {previewLoading ? "—" : formatCurrency(results?.totalAmount ?? 0)}
+                </p>
+                <p className="text-xs text-muted-foreground">total</p>
+              </div>
+              <div className="bg-muted rounded-lg p-2.5">
+                <p className="text-sm font-bold text-foreground leading-tight">
+                  {results?.earliestDate?.substring(0, 7) ?? "—"} →
+                </p>
+                <p className="text-xs text-muted-foreground">{results?.latestDate?.substring(0, 7) ?? "—"}</p>
+              </div>
+            </div>
+
+            {(results?.categories ?? []).length > 0 && (
+              <div className="text-xs text-muted-foreground flex items-start gap-1.5">
+                <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
+                <span>Currently spread across: <span className="text-foreground">{results!.categories.join(", ")}</span></span>
+              </div>
+            )}
+
+            {(results?.samples ?? []).length > 0 && (
+              <div className="space-y-1 max-h-36 overflow-y-auto">
+                {results!.samples.map((s) => (
+                  <div key={s.id} className="flex items-center justify-between py-1 px-2 rounded bg-muted/50 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-foreground truncate">{s.description}</p>
+                      <p className="text-muted-foreground">{s.transactionDate} · {s.category ?? "—"}</p>
+                    </div>
+                    <span className={`flex-shrink-0 font-semibold ml-3 ${s.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
+                      {s.creditDebit === "debit" ? "-" : "+"}{formatCurrency(s.amount)}
+                    </span>
+                  </div>
+                ))}
+                {displayCount > 5 && (
+                  <p className="text-xs text-muted-foreground text-center py-1">+ {displayCount - 5} more transactions</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Actions ──────────────────────────────────────────── */}
+        <div className="flex flex-col gap-2 pt-1 border-t border-border">
+          <Button variant="outline" size="sm" onClick={onClose} className="text-xs h-8">
+            Keep just this one (already saved)
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => handleApply(false)}
+            disabled={applying || selectedCriteria.length === 0 || displayCount === 0}
+            className="text-xs h-8"
+          >
+            {applying ? <RefreshCw className="w-3 h-3 animate-spin mr-1" /> : null}
+            Apply "{newCategory}" to all {displayCount} existing transactions
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => handleApply(true)}
+            disabled={applying || selectedCriteria.length === 0 || displayCount === 0}
+            className="text-xs h-8 flex items-center gap-1.5"
+          >
+            <Tag className="w-3 h-3" />
+            Apply to existing + create rule for future imports
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ── Category Picker ───────────────────────────────────────────────────────
@@ -81,10 +363,7 @@ function CategoryPicker({
     updateMutation.mutate(
       { id: txId, data: { userCategory: cat } },
       {
-        onSuccess: () => {
-          setOpen(false);
-          onDone(cat, currentCategory);
-        },
+        onSuccess: () => { setOpen(false); onDone(cat, currentCategory); },
         onError: () => toast({ title: "Failed to update category", variant: "destructive" }),
       }
     );
@@ -127,117 +406,6 @@ function CategoryPicker({
   );
 }
 
-// ── Bulk Apply Dialog ─────────────────────────────────────────────────────
-
-function BulkApplyDialog({
-  state,
-  onClose,
-  onApply,
-}: {
-  state: BulkDialogState | null;
-  onClose: () => void;
-  onApply: (createRule: boolean) => Promise<void>;
-}) {
-  const [loading, setLoading] = useState(false);
-  if (!state) return null;
-
-  const { similar, oldCategory, newCategory } = state;
-
-  const handleApply = async (createRule: boolean) => {
-    setLoading(true);
-    try { await onApply(createRule); } finally { setLoading(false); }
-  };
-
-  return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-primary" />
-            Apply to similar transactions?
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-relaxed">
-            You changed{" "}
-            <span className="font-semibold text-foreground">"{similar.matchValue}"</span>
-            {oldCategory && <> from <span className="text-amber-400">"{oldCategory}"</span></>}
-            {" "}to <span className="text-emerald-400">"{newCategory}"</span>.
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="bg-muted rounded-lg p-2.5">
-            <p className="text-lg font-bold text-foreground">{similar.count}</p>
-            <p className="text-xs text-muted-foreground">transactions</p>
-          </div>
-          <div className="bg-muted rounded-lg p-2.5">
-            <p className="text-lg font-bold text-foreground">{formatCurrency(similar.totalAmount)}</p>
-            <p className="text-xs text-muted-foreground">total</p>
-          </div>
-          <div className="bg-muted rounded-lg p-2.5">
-            <p className="text-sm font-bold text-foreground leading-tight">{similar.earliestDate?.substring(0, 7)} →</p>
-            <p className="text-xs text-muted-foreground">{similar.latestDate?.substring(0, 7)}</p>
-          </div>
-        </div>
-
-        {/* Current categories breakdown */}
-        {similar.categories.length > 0 && (
-          <div className="text-xs text-muted-foreground flex items-start gap-1.5">
-            <AlertTriangle className="w-3 h-3 text-amber-400 mt-0.5 flex-shrink-0" />
-            <span>Currently spread across: <span className="text-foreground">{similar.categories.join(", ")}</span></span>
-          </div>
-        )}
-
-        {/* Sample transactions */}
-        <div className="space-y-1 max-h-40 overflow-y-auto">
-          {similar.samples.map((s) => (
-            <div key={s.id} className="flex items-center justify-between py-1 px-2 rounded bg-muted/50 text-xs">
-              <div className="min-w-0 flex-1">
-                <p className="text-foreground truncate">{s.description}</p>
-                <p className="text-muted-foreground">{s.transactionDate} · {s.category ?? "—"}</p>
-              </div>
-              <span className={`flex-shrink-0 font-semibold ml-3 ${s.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
-                {s.creditDebit === "debit" ? "-" : "+"}{formatCurrency(s.amount)}
-              </span>
-            </div>
-          ))}
-          {similar.count > 5 && (
-            <p className="text-xs text-muted-foreground text-center py-1">
-              + {similar.count - 5} more transactions
-            </p>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-col gap-2 pt-1">
-          <Button variant="outline" size="sm" onClick={onClose} className="text-xs h-8">
-            Keep just this one (already saved)
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => handleApply(false)}
-            disabled={loading}
-            className="text-xs h-8"
-          >
-            {loading ? <RefreshCw className="w-3 h-3 animate-spin mr-1" /> : null}
-            Apply "{newCategory}" to all {similar.count} existing transactions
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => handleApply(true)}
-            disabled={loading}
-            className="text-xs h-8 flex items-center gap-1.5"
-          >
-            <Tag className="w-3 h-3" />
-            Apply to existing + create rule for future imports
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Main Page ─────────────────────────────────────────────────────────────
 
 export default function Transactions() {
@@ -246,7 +414,6 @@ export default function Transactions() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const search = useSearch();
 
-  // Read account filter from URL ?account=NAME
   const urlParams = new URLSearchParams(search);
   const urlAccount = urlParams.get("account") ?? "";
 
@@ -260,7 +427,6 @@ export default function Transactions() {
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [bulkDialog, setBulkDialog] = useState<BulkDialogState | null>(null);
 
-  // Load all distinct categories for the picker
   useEffect(() => {
     fetch(`${BASE}api/transactions/categories`)
       .then((r) => r.json())
@@ -268,16 +434,13 @@ export default function Transactions() {
       .catch(() => {});
   }, []);
 
-  // Apply URL account param on mount
   useEffect(() => {
     if (urlAccount) setAccountName(urlAccount);
   }, [urlAccount]);
 
   const limit = 20;
-
   const params = {
-    page,
-    limit,
+    page, limit,
     search: debouncedSearch || undefined,
     category: category === "All Categories" ? undefined : category,
     accountName: accountName || undefined,
@@ -285,10 +448,7 @@ export default function Transactions() {
     isTransfer: showTransfers,
   };
 
-  const transactions = useListTransactions(params, {
-    query: { queryKey: getListTransactionsQueryKey(params) },
-  });
-
+  const transactions = useListTransactions(params, { query: { queryKey: getListTransactionsQueryKey(params) } });
   const importMutation = useImportTransactions();
   const updateMutation = useUpdateTransaction();
 
@@ -308,10 +468,7 @@ export default function Transactions() {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchText(e.target.value);
     clearTimeout((window as any).__searchTimer);
-    (window as any).__searchTimer = setTimeout(() => {
-      setDebouncedSearch(e.target.value);
-      setPage(1);
-    }, 400);
+    (window as any).__searchTimer = setTimeout(() => { setDebouncedSearch(e.target.value); setPage(1); }, 400);
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -341,36 +498,26 @@ export default function Transactions() {
   const markAsTransfer = (id: string, current: boolean) => {
     updateMutation.mutate(
       { id, data: { isTransfer: !current } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
-          toast({ title: "Updated", description: `Marked as ${!current ? "transfer" : "not a transfer"}` });
-        },
-      }
+      { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() }); toast({ title: "Updated", description: `Marked as ${!current ? "transfer" : "not a transfer"}` }); } }
     );
   };
 
   const markAsRecurring = (id: string, current: boolean) => {
     updateMutation.mutate(
       { id, data: { isRecurring: !current } },
-      {
-        onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
-          toast({ title: "Updated", description: `Marked as ${!current ? "recurring" : "not recurring"}` });
-        },
-      }
+      { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() }); toast({ title: "Updated", description: `Marked as ${!current ? "recurring" : "not recurring"}` }); } }
     );
   };
 
-  // Called after a category is changed — checks for similar and opens dialog
+  // After saving a category change — fetch similar data and open the dialog
   const handleCategoryChanged = useCallback(async (txId: string, newCat: string, oldCat: string | null) => {
     queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
     try {
       const res = await fetch(`${BASE}api/transactions/${txId}/similar`);
-      if (!res.ok) return;
-      const similar: SimilarResult = await res.json();
-      if (similar.count > 0) {
-        setBulkDialog({ txId, oldCategory: oldCat, newCategory: newCat, similar });
+      if (!res.ok) { toast({ title: "Category updated", description: `Recategorised as "${newCat}"` }); return; }
+      const data: { source: SourceInfo; defaultCriteria: MatchCriterion[]; results: SimilarResults } = await res.json();
+      if (data.results.count > 0) {
+        setBulkDialog({ txId, oldCategory: oldCat, newCategory: newCat, source: data.source, defaultCriteria: data.defaultCriteria, results: data.results });
       } else {
         toast({ title: "Category updated", description: `Recategorised as "${newCat}"` });
       }
@@ -379,37 +526,27 @@ export default function Transactions() {
     }
   }, [queryClient, toast]);
 
-  const handleBulkApply = async (createRule: boolean) => {
+  const handleBulkApply = async (criteria: MatchCriterion[], createRule: boolean) => {
     if (!bulkDialog) return;
-    const { similar, newCategory } = bulkDialog;
-    try {
-      const res = await fetch(`${BASE}api/transactions/bulk-recategorize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          matchField: similar.matchedOn,
-          matchValue: similar.matchValue,
-          newCategory,
-          createRule,
-        }),
-      });
-      const data = await res.json();
-      queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
-      toast({
-        title: `Updated ${data.updated} transactions`,
-        description: createRule
-          ? `Recategorised as "${newCategory}" and created a rule for future imports`
-          : `Recategorised as "${newCategory}"`,
-      });
-    } catch {
-      toast({ title: "Failed to bulk apply", variant: "destructive" });
-    }
+    const { txId, newCategory } = bulkDialog;
+    const res = await fetch(`${BASE}api/transactions/bulk-recategorize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ txId, criteria, newCategory, createRule }),
+    });
+    const data = await res.json();
+    queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+    toast({
+      title: `Updated ${data.updated} transactions`,
+      description: createRule
+        ? `Recategorised as "${newCategory}" and created a rule for future imports`
+        : `Recategorised as "${newCategory}"`,
+    });
     setBulkDialog(null);
   };
 
   const totalPages = transactions.data?.totalPages ?? 1;
-
-  const categoryOptions = ["All Categories", ...allCategories.slice(0, 40)];
+  const categoryOptions = ["All Categories", ...allCategories.slice(0, 60)];
 
   return (
     <div className="p-6 space-y-4">
@@ -419,35 +556,20 @@ export default function Transactions() {
           <h1 className="text-xl font-bold tracking-tight">Transactions</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {transactions.data ? `${transactions.data.total} transactions` : "Loading..."}
-            {accountName && <> · <span className="text-primary">{accountName}</span> <button onClick={() => setAccountName("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3 inline" /></button></>}
+            {accountName && (
+              <> · <span className="text-primary">{accountName}</span>{" "}
+                <button onClick={() => setAccountName("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3 inline" /></button>
+              </>
+            )}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => redetectMutation.mutate()}
-            disabled={redetectMutation.isPending}
-            title="Re-run pair-matching transfer detection"
-            className="flex items-center gap-1.5"
-          >
+          <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileSelect} className="hidden" />
+          <Button variant="outline" size="sm" onClick={() => redetectMutation.mutate()} disabled={redetectMutation.isPending} className="flex items-center gap-1.5">
             {redetectMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Shuffle className="w-3.5 h-3.5" />}
             Re-detect transfers
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importMutation.isPending}
-            className="flex items-center gap-1.5"
-          >
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending} className="flex items-center gap-1.5">
             {importMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             Import CSV
           </Button>
@@ -458,66 +580,32 @@ export default function Transactions() {
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input
-            value={searchText}
-            onChange={handleSearchChange}
-            placeholder="Search transactions..."
-            className="pl-8 h-8 text-sm"
-          />
+          <Input value={searchText} onChange={handleSearchChange} placeholder="Search transactions..." className="pl-8 h-8 text-sm" />
         </div>
-
-        {/* Account filter */}
         <div className="relative min-w-[140px]">
-          <Input
-            value={accountName}
-            onChange={(e) => { setAccountName(e.target.value); setPage(1); }}
-            placeholder="Filter by account..."
-            className="h-8 text-sm pr-6"
-          />
+          <Input value={accountName} onChange={(e) => { setAccountName(e.target.value); setPage(1); }} placeholder="Filter by account..." className="h-8 text-sm pr-6" />
           {accountName && (
             <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setAccountName("")}>
               <X className="w-3 h-3" />
             </button>
           )}
         </div>
-
         <Select value={category} onValueChange={(v) => { setCategory(v); setPage(1); }}>
-          <SelectTrigger className="h-8 text-sm w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {categoryOptions.map((c) => (
-              <SelectItem key={c} value={c}>{c}</SelectItem>
-            ))}
-          </SelectContent>
+          <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>{categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
         </Select>
-
         <Select value={creditDebit} onValueChange={(v) => { setCreditDebit(v as any); setPage(1); }}>
-          <SelectTrigger className="h-8 text-sm w-28">
-            <SelectValue />
-          </SelectTrigger>
+          <SelectTrigger className="h-8 text-sm w-28"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="credit">Credits</SelectItem>
             <SelectItem value="debit">Debits</SelectItem>
           </SelectContent>
         </Select>
-
-        <Button
-          variant={showTransfers === false ? "default" : "outline"}
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => setShowTransfers(showTransfers === false ? undefined : false)}
-        >
+        <Button variant={showTransfers === false ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={() => setShowTransfers(showTransfers === false ? undefined : false)}>
           Hide transfers
         </Button>
-
-        <Button
-          variant={showTransfers === true ? "default" : "outline"}
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => setShowTransfers(showTransfers === true ? undefined : true)}
-        >
+        <Button variant={showTransfers === true ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={() => setShowTransfers(showTransfers === true ? undefined : true)}>
           Transfers only
         </Button>
       </div>
@@ -545,9 +633,7 @@ export default function Transactions() {
                 [...Array(8)].map((_, i) => (
                   <tr key={i} className="border-b border-border">
                     {[...Array(7)].map((_, j) => (
-                      <td key={j} className="py-2.5 px-3">
-                        <div className="h-3 bg-muted rounded animate-pulse" />
-                      </td>
+                      <td key={j} className="py-2.5 px-3"><div className="h-3 bg-muted rounded animate-pulse" /></td>
                     ))}
                   </tr>
                 ))
@@ -559,10 +645,7 @@ export default function Transactions() {
                 </tr>
               ) : (
                 (transactions.data?.transactions ?? []).map((tx) => (
-                  <tr
-                    key={tx.id}
-                    className={`border-b border-border hover:bg-muted/30 transition-colors ${tx.isTransfer ? "opacity-60" : ""}`}
-                  >
+                  <tr key={tx.id} className={`border-b border-border hover:bg-muted/30 transition-colors ${tx.isTransfer ? "opacity-60" : ""}`}>
                     <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
                     <td className="py-2.5 px-3 max-w-[200px]">
                       <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
@@ -598,12 +681,8 @@ export default function Transactions() {
                     </td>
                     <td className="py-2.5 px-3">
                       <div className="flex gap-1 flex-wrap">
-                        {tx.isTransfer && (
-                          <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded text-xs">Transfer</span>
-                        )}
-                        {tx.isRecurring && (
-                          <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded text-xs">Recurring</span>
-                        )}
+                        {tx.isTransfer && <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded text-xs">Transfer</span>}
+                        {tx.isRecurring && <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded text-xs">Recurring</span>}
                       </div>
                     </td>
                     <td className={`py-2.5 px-3 text-right font-semibold tabular-nums whitespace-nowrap ${tx.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
@@ -633,38 +712,24 @@ export default function Transactions() {
             </tbody>
           </table>
         </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages} ({transactions.data?.total ?? 0} total)
-            </span>
-            <div className="flex gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="h-7 w-7 p-0"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="h-7 w-7 p-0"
-              >
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Bulk Apply Dialog */}
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>Page {page} of {totalPages}</span>
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk apply dialog */}
       <BulkApplyDialog
         state={bulkDialog}
         onClose={() => setBulkDialog(null)}
