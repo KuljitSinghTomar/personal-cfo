@@ -7,6 +7,7 @@ import scenariosRouter from "./scenarios";
 import budgetRouter from "./budget";
 import netWorthRouter from "./net-worth";
 import categoryRulesRouter from "./category-rules";
+import investmentsRouter from "./investments";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(scenariosRouter);
 router.use(budgetRouter);
 router.use(netWorthRouter);
 router.use(categoryRulesRouter);
+router.use(investmentsRouter);
 
 export default router;
