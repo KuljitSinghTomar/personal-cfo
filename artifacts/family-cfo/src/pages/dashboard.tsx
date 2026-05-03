@@ -14,20 +14,29 @@ import {
   getGetAiInsightsQueryKey,
   useListTransactions,
   getListTransactionsQueryKey,
+  useUpdateTransaction,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Line,
 } from "recharts";
 import {
   TrendingUp, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle,
-  ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Calendar,
+  ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Calendar, ChevronsUpDown, Check,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import { useToast } from "@/hooks/use-toast";
 
 const CHART_COLORS = ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
 const BASE = import.meta.env.BASE_URL;
@@ -183,6 +192,67 @@ interface CategoryRow {
   percentage: number;
 }
 
+// ── Category Picker Button ────────────────────────────────────────────────
+
+function CategoryPickerButton({
+  txId,
+  currentCategory,
+  allCategories,
+  onCategoryChange,
+  isLoading,
+}: {
+  txId: string;
+  currentCategory: string | null;
+  allCategories: string[];
+  onCategoryChange: (txId: string, newCat: string) => void;
+  isLoading: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const handleSelect = (cat: string) => {
+    if (cat === currentCategory) { setOpen(false); return; }
+    onCategoryChange(txId, cat);
+    setOpen(false);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          className="group flex items-center gap-1 bg-secondary text-secondary-foreground hover:bg-primary/10 hover:text-primary border border-transparent hover:border-primary/30 px-2 py-0.5 rounded text-xs transition-colors"
+          title="Click to recategorise"
+          disabled={isLoading}
+        >
+          <span className="truncate max-w-[100px]">{currentCategory ?? "—"}</span>
+          <ChevronsUpDown className="w-2.5 h-2.5 opacity-0 group-hover:opacity-60 transition-opacity flex-shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search categories..." className="h-8 text-xs" />
+          <CommandList>
+            <CommandEmpty>No category found</CommandEmpty>
+            <CommandGroup>
+              {allCategories.map((cat) => (
+                <CommandItem
+                  key={cat}
+                  value={cat}
+                  onSelect={() => handleSelect(cat)}
+                  className="text-xs cursor-pointer"
+                  disabled={isLoading}
+                >
+                  <Check className={`mr-1.5 h-3 w-3 ${cat === currentCategory ? "opacity-100" : "opacity-0"}`} />
+                  {cat}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ── Category drilldown sheet ───────────────────────────────────────────────
 
 function DrillDownSheet({
@@ -193,11 +263,15 @@ function DrillDownSheet({
   onClose: () => void;
 }) {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const updateMutation = useUpdateTransaction();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [total, setTotal] = useState(0);
   const [catLoading, setCatLoading] = useState(false);
   const [catSearch, setCatSearch] = useState("");
+  const [allCategories, setAllCategories] = useState<string[]>([]);
 
   // Transactions level state
   const [txPage, setTxPage] = useState(1);
@@ -225,6 +299,14 @@ function DrillDownSheet({
     }
   );
 
+  // Fetch all available categories on mount
+  useEffect(() => {
+    fetch(`${BASE}api/transactions/categories`)
+      .then((r) => r.json())
+      .then((d) => setAllCategories(d.categories ?? []))
+      .catch(() => {});
+  }, []);
+
   // Fetch categories when drill state changes
   useEffect(() => {
     if (!drill) { setCategories([]); setSelectedCategory(null); setCatSearch(""); return; }
@@ -244,6 +326,19 @@ function DrillDownSheet({
 
   // Reset tx page when category changes
   useEffect(() => { setTxPage(1); }, [selectedCategory]);
+
+  const handleCategoryChange = (txId: string, newCat: string) => {
+    updateMutation.mutate(
+      { id: txId, data: { userCategory: newCat } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey(txParams ?? { page: 1, limit: TX_LIMIT }) });
+          toast({ title: "Category updated", description: `Recategorised as "${newCat}"` });
+        },
+        onError: () => toast({ title: "Failed to update category", variant: "destructive" }),
+      }
+    );
+  };
 
   if (!drill) return null;
 
@@ -428,7 +523,7 @@ function DrillDownSheet({
                         className="flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg hover:bg-muted/40 transition-colors border-b border-border last:border-0"
                       >
                         {/* Date */}
-                        <div className="flex-shrink-0 w-20 text-right">
+                        <div className="flex-shrink-0 w-16 text-right">
                           <span className="text-xs text-muted-foreground">{tx.transactionDate}</span>
                         </div>
                         {/* Description */}
@@ -441,8 +536,18 @@ function DrillDownSheet({
                           )}
                           <p className="text-xs text-muted-foreground">{tx.accountName}</p>
                         </div>
+                        {/* Category Picker */}
+                        <div className="flex-shrink-0">
+                          <CategoryPickerButton
+                            txId={tx.id}
+                            currentCategory={tx.userCategory ?? tx.categoryName}
+                            allCategories={allCategories}
+                            onCategoryChange={handleCategoryChange}
+                            isLoading={updateMutation.isPending}
+                          />
+                        </div>
                         {/* Amount */}
-                        <div className="flex-shrink-0 text-right">
+                        <div className="flex-shrink-0 w-20 text-right">
                           <span className={`text-sm font-semibold tabular-nums ${isIncome ? "text-emerald-400" : "text-foreground"}`}>
                             {isIncome ? "+" : "-"}{formatCurrencyFull(tx.amount)}
                           </span>
