@@ -417,13 +417,15 @@ export default function Transactions() {
   const urlParams = new URLSearchParams(search);
   const urlAccount = urlParams.get("account") ?? "";
 
+  const [activeTab, setActiveTab] = useState<"transactions" | "transfers">(
+    (urlParams.get("tab") as "transactions" | "transfers") ?? "transactions"
+  );
   const [page, setPage] = useState(1);
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [category, setCategory] = useState("All Categories");
+  const [category, setCategory] = useState(urlParams.get("category") ?? "All Categories");
   const [accountName, setAccountName] = useState(urlAccount);
   const [creditDebit, setCreditDebit] = useState<"all" | "credit" | "debit">("all");
-  const [showTransfers, setShowTransfers] = useState<boolean | undefined>(undefined);
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [bulkDialog, setBulkDialog] = useState<BulkDialogState | null>(null);
 
@@ -441,11 +443,11 @@ export default function Transactions() {
   const limit = 20;
   const params = {
     page, limit,
-    search: debouncedSearch || undefined,
-    category: category === "All Categories" ? undefined : category,
-    accountName: accountName || undefined,
-    creditDebit: creditDebit === "all" ? undefined : creditDebit,
-    isTransfer: showTransfers,
+    search: activeTab === "transactions" ? (debouncedSearch || undefined) : undefined,
+    category: activeTab === "transactions" ? (category === "All Categories" ? undefined : category) : undefined,
+    accountName: activeTab === "transactions" ? (accountName || undefined) : undefined,
+    creditDebit: activeTab === "transactions" ? (creditDebit === "all" ? undefined : creditDebit) : undefined,
+    isTransfer: activeTab === "transfers",
   };
 
   const transactions = useListTransactions(params, { query: { queryKey: getListTransactionsQueryKey(params) } });
@@ -555,8 +557,8 @@ export default function Transactions() {
         <div>
           <h1 className="text-xl font-bold tracking-tight">Transactions</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {transactions.data ? `${transactions.data.total} transactions` : "Loading..."}
-            {accountName && (
+            {transactions.data ? `${transactions.data.total} ${activeTab === "transfers" ? "transfers" : "transactions"}` : "Loading..."}
+            {activeTab === "transactions" && accountName && (
               <> · <span className="text-primary">{accountName}</span>{" "}
                 <button onClick={() => setAccountName("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3 inline" /></button>
               </>
@@ -565,10 +567,12 @@ export default function Transactions() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileSelect} className="hidden" />
-          <Button variant="outline" size="sm" onClick={() => redetectMutation.mutate()} disabled={redetectMutation.isPending} className="flex items-center gap-1.5">
-            {redetectMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Shuffle className="w-3.5 h-3.5" />}
-            Re-detect transfers
-          </Button>
+          {activeTab === "transfers" && (
+            <Button variant="outline" size="sm" onClick={() => redetectMutation.mutate()} disabled={redetectMutation.isPending} className="flex items-center gap-1.5">
+              {redetectMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Shuffle className="w-3.5 h-3.5" />}
+              Re-detect transfers
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending} className="flex items-center gap-1.5">
             {importMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             Import CSV
@@ -576,39 +580,66 @@ export default function Transactions() {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input value={searchText} onChange={handleSearchChange} placeholder="Search transactions..." className="pl-8 h-8 text-sm" />
-        </div>
-        <div className="relative min-w-[140px]">
-          <Input value={accountName} onChange={(e) => { setAccountName(e.target.value); setPage(1); }} placeholder="Filter by account..." className="h-8 text-sm pr-6" />
-          {accountName && (
-            <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setAccountName("")}>
-              <X className="w-3 h-3" />
-            </button>
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-border">
+        <button
+          onClick={() => { setActiveTab("transactions"); setPage(1); }}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === "transactions" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        >
+          Transactions
+        </button>
+        <button
+          onClick={() => { setActiveTab("transfers"); setPage(1); }}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${activeTab === "transfers" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        >
+          <Repeat2 className="w-3.5 h-3.5" />
+          Transfers
+          {activeTab !== "transfers" && transactions.data && (
+            <span className="text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 leading-none" />
           )}
-        </div>
-        <Select value={category} onValueChange={(v) => { setCategory(v); setPage(1); }}>
-          <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>{categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-        </Select>
-        <Select value={creditDebit} onValueChange={(v) => { setCreditDebit(v as any); setPage(1); }}>
-          <SelectTrigger className="h-8 text-sm w-28"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="credit">Credits</SelectItem>
-            <SelectItem value="debit">Debits</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button variant={showTransfers === false ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={() => setShowTransfers(showTransfers === false ? undefined : false)}>
-          Hide transfers
-        </Button>
-        <Button variant={showTransfers === true ? "default" : "outline"} size="sm" className="h-8 text-xs" onClick={() => setShowTransfers(showTransfers === true ? undefined : true)}>
-          Transfers only
-        </Button>
+        </button>
       </div>
+
+      {/* Transfers info banner */}
+      {activeTab === "transfers" && (
+        <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-3 text-sm text-blue-300 flex items-start gap-2">
+          <Repeat2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium">Transfer review</p>
+            <p className="text-xs text-blue-300/70 mt-0.5">These transactions are excluded from income, expenses and all calculations. Review them here and use <span className="font-medium">Mark as not a transfer</span> if any were incorrectly classified.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Filters — only shown for main transactions tab */}
+      {activeTab === "transactions" && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input value={searchText} onChange={handleSearchChange} placeholder="Search transactions..." className="pl-8 h-8 text-sm" />
+          </div>
+          <div className="relative min-w-[140px]">
+            <Input value={accountName} onChange={(e) => { setAccountName(e.target.value); setPage(1); }} placeholder="Filter by account..." className="h-8 text-sm pr-6" />
+            {accountName && (
+              <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setAccountName("")}>
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          <Select value={category} onValueChange={(v) => { setCategory(v); setPage(1); }}>
+            <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>{categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+          </Select>
+          <Select value={creditDebit} onValueChange={(v) => { setCreditDebit(v as any); setPage(1); }}>
+            <SelectTrigger className="h-8 text-sm w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="credit">Credits</SelectItem>
+              <SelectItem value="debit">Debits</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-card border border-card-border rounded-lg overflow-hidden">
@@ -645,7 +676,7 @@ export default function Transactions() {
                 </tr>
               ) : (
                 (transactions.data?.transactions ?? []).map((tx) => (
-                  <tr key={tx.id} className={`border-b border-border hover:bg-muted/30 transition-colors ${tx.isTransfer ? "opacity-60" : ""}`}>
+                  <tr key={tx.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                     <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
                     <td className="py-2.5 px-3 max-w-[200px]">
                       <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
@@ -657,7 +688,7 @@ export default function Transactions() {
                       <button
                         className="truncate max-w-[120px] text-left hover:text-primary transition-colors block"
                         title={`Filter by ${tx.accountName}`}
-                        onClick={() => { setAccountName(tx.accountName); setPage(1); }}
+                        onClick={() => activeTab === "transactions" && (setAccountName(tx.accountName), setPage(1))}
                       >
                         {tx.accountName}
                       </button>
@@ -674,15 +705,12 @@ export default function Transactions() {
                         {tx.userCategory && tx.userCategory !== tx.categoryName && (
                           <span className="text-xs text-primary" title={`Original: ${tx.categoryName}`}>✎</span>
                         )}
-                        {tx.aiConfidenceScore !== null && tx.aiConfidenceScore !== undefined && !tx.userCategory && (
-                          <span className="text-xs text-muted-foreground">{(tx.aiConfidenceScore * 100).toFixed(0)}%</span>
-                        )}
                       </div>
                     </td>
                     <td className="py-2.5 px-3">
                       <div className="flex gap-1 flex-wrap">
-                        {tx.isTransfer && <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded text-xs">Transfer</span>}
                         {tx.isRecurring && <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded text-xs">Recurring</span>}
+                        <span className="text-xs text-muted-foreground/50">{tx.transactionType}</span>
                       </div>
                     </td>
                     <td className={`py-2.5 px-3 text-right font-semibold tabular-nums whitespace-nowrap ${tx.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
@@ -690,20 +718,32 @@ export default function Transactions() {
                     </td>
                     <td className="py-2.5 px-3 text-right">
                       <div className="flex gap-1 justify-end">
-                        <button
-                          onClick={() => markAsTransfer(tx.id, tx.isTransfer)}
-                          className={`text-xs px-2 py-1 rounded border transition-colors ${tx.isTransfer ? "bg-blue-500/20 border-blue-500/30 text-blue-400" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
-                          title="Toggle Transfer"
-                        >
-                          <Repeat2 className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => markAsRecurring(tx.id, tx.isRecurring)}
-                          className={`text-xs px-2 py-1 rounded border transition-colors ${tx.isRecurring ? "bg-purple-500/20 border-purple-500/30 text-purple-400" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
-                          title="Toggle Recurring"
-                        >
-                          <Clock className="w-3 h-3" />
-                        </button>
+                        {activeTab === "transfers" ? (
+                          <button
+                            onClick={() => markAsTransfer(tx.id, tx.isTransfer)}
+                            className="text-xs px-2.5 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1"
+                            title="Move this back to regular transactions"
+                          >
+                            <X className="w-3 h-3" /> Not a transfer
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => markAsTransfer(tx.id, tx.isTransfer)}
+                              className="text-xs px-2 py-1 rounded border transition-colors border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                              title="Mark as transfer"
+                            >
+                              <Repeat2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => markAsRecurring(tx.id, tx.isRecurring)}
+                              className={`text-xs px-2 py-1 rounded border transition-colors ${tx.isRecurring ? "bg-purple-500/20 border-purple-500/30 text-purple-400" : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"}`}
+                              title="Toggle Recurring"
+                            >
+                              <Clock className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

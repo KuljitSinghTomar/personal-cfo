@@ -174,7 +174,14 @@ const router = Router();
 
 router.get("/transactions", async (req, res) => {
   try {
-    const query = ListTransactionsQueryParams.parse(req.query);
+    // zod.coerce.boolean() uses Boolean(value) which treats the string "false" as true.
+    // Manually convert string booleans before parsing.
+    const rawQuery: Record<string, unknown> = { ...req.query };
+    if (rawQuery.isTransfer === "false") rawQuery.isTransfer = false;
+    else if (rawQuery.isTransfer === "true") rawQuery.isTransfer = true;
+    if (rawQuery.isRecurring === "false") rawQuery.isRecurring = false;
+    else if (rawQuery.isRecurring === "true") rawQuery.isRecurring = true;
+    const query = ListTransactionsQueryParams.parse(rawQuery);
     const { page, limit, startDate, endDate, category, accountName, search, creditDebit, isTransfer, isRecurring } = query;
 
     const conditions = [];

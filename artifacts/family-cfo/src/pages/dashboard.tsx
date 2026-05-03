@@ -443,7 +443,7 @@ function MetricCard({
 }: {
   label: string;
   value: string;
-  sub?: string;
+  sub?: React.ReactNode;
   positive?: boolean;
   onClick?: () => void;
   hint?: string;
@@ -636,7 +636,15 @@ export default function Dashboard() {
           <MetricCard
             label="Savings Rate"
             value={`${(s?.savingsRate ?? 0).toFixed(1)}%`}
-            sub={`${s?.transfersFiltered ?? 0} transfers filtered`}
+            sub={
+              <a
+                href="/transactions?tab=transfers"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                {s?.transfersFiltered ?? 0} transfers excluded →
+              </a>
+            }
             positive={(s?.savingsRate ?? 0) >= 15}
             change={isMonthly && prevSummary.data ? pctChange(s?.savingsRate ?? 0, prevSummary.data.savingsRate) : undefined}
           />
