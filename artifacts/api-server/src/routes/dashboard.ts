@@ -250,6 +250,59 @@ router.get("/dashboard/accounts", async (req, res) => {
   }
 });
 
+router.get("/dashboard/category-drilldown", async (req, res) => {
+  try {
+    const type = (req.query.type as string) === "income" ? "income" : "expenses";
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+
+    const creditDebit = type === "income" ? "credit" : "debit";
+
+    const conditions = [
+      eq(transactionsTable.included, true),
+      eq(transactionsTable.creditDebit, creditDebit),
+      eq(transactionsTable.isTransfer, false),
+    ];
+    if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
+    if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
+
+    const rows = await db
+      .select({
+        amount: transactionsTable.amount,
+        categoryName: transactionsTable.categoryName,
+        userCategory: transactionsTable.userCategory,
+      })
+      .from(transactionsTable)
+      .where(and(...conditions));
+
+    const categoryTotals: Record<string, { amount: number; count: number }> = {};
+    let total = 0;
+
+    for (const row of rows) {
+      const category = row.userCategory ?? row.categoryName ?? "Uncategorised";
+      const amount = parseFloat(row.amount);
+      total += amount;
+      if (!categoryTotals[category]) categoryTotals[category] = { amount: 0, count: 0 };
+      categoryTotals[category].amount += amount;
+      categoryTotals[category].count++;
+    }
+
+    const categories = Object.entries(categoryTotals)
+      .map(([category, data]) => ({
+        category,
+        amount: data.amount,
+        count: data.count,
+        percentage: total > 0 ? (data.amount / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
+    res.json({ type, categories, total });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get category drilldown");
+    res.status(500).json({ error: "Failed to get category drilldown" });
+  }
+});
+
 router.get("/dashboard/forecast", async (req, res) => {
   try {
     const now = new Date();

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useGetDashboardSummary,
   getGetDashboardSummaryQueryKey,
@@ -16,26 +16,27 @@ import {
   getListTransactionsQueryKey,
 } from "@workspace/api-client-react";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
-import { TrendingUp, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  TrendingUp, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle,
+  ChevronLeft, ChevronRight, ChevronDown, ExternalLink,
+} from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from "@/components/ui/sheet";
 
 const CHART_COLORS = ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
+const BASE = import.meta.env.BASE_URL;
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(amount);
+}
+function formatCurrencyFull(amount: number) {
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 2 }).format(amount);
 }
 
 function getLast18Months() {
@@ -58,16 +59,6 @@ function getMonthDateRange(month: string) {
   return { startDate: start, endDate: end };
 }
 
-function MetricCard({ label, value, sub, positive }: { label: string; value: string; sub?: string; positive?: boolean }) {
-  return (
-    <div className="bg-card border border-card-border rounded-lg p-4 flex flex-col gap-1">
-      <span className="text-xs font-medium uppercase tracking-widest text-muted-foreground">{label}</span>
-      <span className={`text-2xl font-bold tabular-nums ${positive === true ? "text-emerald-400" : positive === false ? "text-red-400" : "text-foreground"}`}>{value}</span>
-      {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
-    </div>
-  );
-}
-
 function InsightIcon({ type }: { type: string }) {
   if (type === "warning") return <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />;
   if (type === "positive") return <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />;
@@ -79,8 +70,389 @@ function InsightIcon({ type }: { type: string }) {
 const MONTH_OPTIONS = getLast18Months();
 const ALL_TIME = "__all__";
 
+// ── Drilldown types ────────────────────────────────────────────────────────
+
+type DrillType = "income" | "expenses";
+
+interface DrillState {
+  type: DrillType;
+  startDate?: string;
+  endDate?: string;
+  label: string;
+}
+
+interface CategoryRow {
+  category: string;
+  amount: number;
+  count: number;
+  percentage: number;
+}
+
+// ── Category drilldown sheet ───────────────────────────────────────────────
+
+function DrillDownSheet({
+  drill,
+  onClose,
+}: {
+  drill: DrillState | null;
+  onClose: () => void;
+}) {
+  const [, navigate] = useLocation();
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [catLoading, setCatLoading] = useState(false);
+  const [catSearch, setCatSearch] = useState("");
+
+  // Transactions level state
+  const [txPage, setTxPage] = useState(1);
+  const TX_LIMIT = 15;
+
+  const txParams = selectedCategory && drill
+    ? {
+        page: txPage,
+        limit: TX_LIMIT,
+        category: selectedCategory,
+        creditDebit: drill.type === "income" ? ("credit" as const) : ("debit" as const),
+        startDate: drill.startDate,
+        endDate: drill.endDate,
+        isTransfer: false as const,
+      }
+    : null;
+
+  const txQuery = useListTransactions(
+    txParams ?? { page: 1, limit: TX_LIMIT },
+    {
+      query: {
+        queryKey: getListTransactionsQueryKey(txParams ?? { page: 1, limit: TX_LIMIT }),
+        enabled: !!txParams,
+      },
+    }
+  );
+
+  // Fetch categories when drill state changes
+  useEffect(() => {
+    if (!drill) { setCategories([]); setSelectedCategory(null); setCatSearch(""); return; }
+    setCatLoading(true);
+    setSelectedCategory(null);
+    setTxPage(1);
+    setCatSearch("");
+    const params = new URLSearchParams({ type: drill.type });
+    if (drill.startDate) params.set("startDate", drill.startDate);
+    if (drill.endDate) params.set("endDate", drill.endDate);
+    fetch(`${BASE}api/dashboard/category-drilldown?${params}`)
+      .then((r) => r.json())
+      .then((d) => { setCategories(d.categories ?? []); setTotal(d.total ?? 0); })
+      .catch(() => {})
+      .finally(() => setCatLoading(false));
+  }, [drill]);
+
+  // Reset tx page when category changes
+  useEffect(() => { setTxPage(1); }, [selectedCategory]);
+
+  if (!drill) return null;
+
+  const isIncome = drill.type === "income";
+  const accentColor = isIncome ? "text-emerald-400" : "text-red-400";
+  const barColor = isIncome ? "#10b981" : "#ef4444";
+
+  const filteredCats = catSearch
+    ? categories.filter((c) => c.category.toLowerCase().includes(catSearch.toLowerCase()))
+    : categories;
+
+  const txs = txQuery.data?.transactions ?? [];
+  const txTotal = txQuery.data?.total ?? 0;
+  const txTotalPages = txQuery.data?.totalPages ?? 1;
+
+  const selectedCatData = categories.find((c) => c.category === selectedCategory);
+
+  // Build query string for the "View all" link
+  const viewAllParams = new URLSearchParams();
+  if (selectedCategory) viewAllParams.set("category", selectedCategory);
+  viewAllParams.set("creditDebit", isIncome ? "credit" : "debit");
+  if (drill.startDate) viewAllParams.set("startDate", drill.startDate);
+  if (drill.endDate) viewAllParams.set("endDate", drill.endDate);
+
+  return (
+    <Sheet open={!!drill} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-2xl flex flex-col p-0 gap-0"
+      >
+        {/* ── Header ───────────────────────────────────────────── */}
+        <SheetHeader className="px-5 pt-5 pb-3 border-b border-border flex-shrink-0">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
+            <button
+              onClick={() => setSelectedCategory(null)}
+              className={`hover:text-foreground transition-colors ${!selectedCategory ? "text-foreground font-medium" : ""}`}
+            >
+              {isIncome ? "Income" : "Expenses"}
+            </button>
+            {selectedCategory && (
+              <>
+                <ChevronRight className="w-3 h-3" />
+                <span className="text-foreground font-medium truncate max-w-[180px]">{selectedCategory}</span>
+              </>
+            )}
+          </div>
+
+          <SheetTitle className="text-base leading-tight">
+            {selectedCategory ? (
+              <span className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {selectedCategory}
+              </span>
+            ) : (
+              `${isIncome ? "Income" : "Expenses"} — ${drill.label}`
+            )}
+          </SheetTitle>
+
+          {/* Summary line */}
+          <p className="text-xs text-muted-foreground">
+            {selectedCategory && selectedCatData
+              ? <>
+                  <span className={`font-semibold ${accentColor}`}>{formatCurrency(selectedCatData.amount)}</span>
+                  {" · "}{selectedCatData.count} transactions{" · "}
+                  {selectedCatData.percentage.toFixed(1)}% of {isIncome ? "income" : "expenses"}
+                </>
+              : <>
+                  <span className={`font-semibold ${accentColor}`}>{formatCurrency(total)}</span>
+                  {" · "}{categories.reduce((s, c) => s + c.count, 0)} transactions{" · "}
+                  {categories.length} categories
+                </>
+            }
+          </p>
+        </SheetHeader>
+
+        {/* ── Body ─────────────────────────────────────────────── */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* ── Level 1: Categories ─────────────────────────── */}
+          {!selectedCategory && (
+            <div className="px-5 py-4 space-y-3">
+              {/* Search */}
+              <input
+                type="text"
+                value={catSearch}
+                onChange={(e) => setCatSearch(e.target.value)}
+                placeholder={`Search ${isIncome ? "income sources" : "expense categories"}…`}
+                className="w-full h-8 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+
+              {catLoading ? (
+                <div className="space-y-2">
+                  {[...Array(8)].map((_, i) => (
+                    <div key={i} className="h-12 rounded-lg bg-muted animate-pulse" />
+                  ))}
+                </div>
+              ) : filteredCats.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No categories found</p>
+              ) : (
+                <div className="space-y-1">
+                  {filteredCats.map((cat, i) => (
+                    <button
+                      key={cat.category}
+                      onClick={() => setSelectedCategory(cat.category)}
+                      className="w-full text-left group rounded-lg px-3 py-2.5 hover:bg-muted/60 transition-colors border border-transparent hover:border-border"
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className="w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ background: CHART_COLORS[i % CHART_COLORS.length] }}
+                          />
+                          <span className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                            {cat.category}
+                          </span>
+                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                            {cat.count} txns
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`text-sm font-semibold tabular-nums ${accentColor}`}>
+                            {formatCurrency(cat.amount)}
+                          </span>
+                          <span className="text-xs text-muted-foreground w-9 text-right">
+                            {cat.percentage.toFixed(0)}%
+                          </span>
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                        </div>
+                      </div>
+                      {/* Progress bar */}
+                      <div className="h-1 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${cat.percentage}%`,
+                            background: CHART_COLORS[i % CHART_COLORS.length],
+                          }}
+                        />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* View all link */}
+              <div className="pt-2 border-t border-border">
+                <Link
+                  href={`/transactions?creditDebit=${isIncome ? "credit" : "debit"}${drill.startDate ? `&startDate=${drill.startDate}` : ""}${drill.endDate ? `&endDate=${drill.endDate}` : ""}`}
+                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  onClick={onClose}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  View all {isIncome ? "income" : "expense"} transactions
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {/* ── Level 2: Transactions ─────────────────────────── */}
+          {selectedCategory && (
+            <div className="px-5 py-4 space-y-2">
+              {txQuery.isLoading ? (
+                <div className="space-y-2">
+                  {[...Array(8)].map((_, i) => (
+                    <div key={i} className="h-10 rounded-lg bg-muted animate-pulse" />
+                  ))}
+                </div>
+              ) : txs.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No transactions found</p>
+              ) : (
+                <>
+                  <div className="space-y-0.5">
+                    {txs.map((tx) => (
+                      <div
+                        key={tx.id}
+                        className="flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg hover:bg-muted/40 transition-colors border-b border-border last:border-0"
+                      >
+                        {/* Date */}
+                        <div className="flex-shrink-0 w-20 text-right">
+                          <span className="text-xs text-muted-foreground">{tx.transactionDate}</span>
+                        </div>
+                        {/* Description */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">
+                            {tx.userDescription ?? tx.description}
+                          </p>
+                          {tx.merchantName && tx.merchantName !== "Unknown" && (
+                            <p className="text-xs text-muted-foreground truncate">{tx.merchantName}</p>
+                          )}
+                          <p className="text-xs text-muted-foreground">{tx.accountName}</p>
+                        </div>
+                        {/* Amount */}
+                        <div className="flex-shrink-0 text-right">
+                          <span className={`text-sm font-semibold tabular-nums ${isIncome ? "text-emerald-400" : "text-foreground"}`}>
+                            {isIncome ? "+" : "-"}{formatCurrencyFull(tx.amount)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination */}
+                  {txTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-2 text-xs text-muted-foreground">
+                      <span>{txTotal} transactions · page {txPage} of {txTotalPages}</span>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => setTxPage((p) => Math.max(1, p - 1))}
+                          disabled={txPage === 1}
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => setTxPage((p) => Math.min(txTotalPages, p + 1))}
+                          disabled={txPage === txTotalPages}
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* View all link */}
+                  <div className="pt-2 border-t border-border">
+                    <Link
+                      href={`/transactions?category=${encodeURIComponent(selectedCategory)}&creditDebit=${isIncome ? "credit" : "debit"}`}
+                      className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                      onClick={onClose}
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      View all "{selectedCategory}" transactions in full view
+                    </Link>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+// ── Clickable metric card ──────────────────────────────────────────────────
+
+function MetricCard({
+  label,
+  value,
+  sub,
+  positive,
+  onClick,
+  hint,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  positive?: boolean;
+  onClick?: () => void;
+  hint?: string;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-card border border-card-border rounded-lg p-4 flex flex-col gap-1 ${
+        onClick ? "cursor-pointer hover:border-primary/40 hover:bg-muted/20 transition-colors group" : ""
+      }`}
+      title={hint}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-widest text-muted-foreground">{label}</span>
+        {onClick && (
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary transition-colors" />
+        )}
+      </div>
+      <span className={`text-2xl font-bold tabular-nums ${positive === true ? "text-emerald-400" : positive === false ? "text-red-400" : "text-foreground"}`}>
+        {value}
+      </span>
+      {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
+      {onClick && (
+        <span className="text-xs text-muted-foreground/50 group-hover:text-primary/70 transition-colors">
+          Click to drill in →
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Main Dashboard ─────────────────────────────────────────────────────────
+
 export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState<string>(ALL_TIME);
+  const [drill, setDrill] = useState<DrillState | null>(null);
 
   const isMonthly = selectedMonth !== ALL_TIME;
   const dateRange = isMonthly ? getMonthDateRange(selectedMonth) : undefined;
@@ -106,19 +478,14 @@ export default function Dashboard() {
   const s = summary.data;
   const f = forecast.data;
 
-  // Navigate months
   const currentMonthIdx = MONTH_OPTIONS.findIndex((m) => m.value === selectedMonth);
   const canGoBack = currentMonthIdx < MONTH_OPTIONS.length - 1;
   const canGoForward = isMonthly && currentMonthIdx > 0;
 
   function stepMonth(dir: 1 | -1) {
-    if (selectedMonth === ALL_TIME) {
-      setSelectedMonth(MONTH_OPTIONS[0]!.value);
-      return;
-    }
+    if (selectedMonth === ALL_TIME) { setSelectedMonth(MONTH_OPTIONS[0]!.value); return; }
     const next = MONTH_OPTIONS[currentMonthIdx - dir];
-    if (next) setSelectedMonth(next.value);
-    else setSelectedMonth(ALL_TIME);
+    if (next) setSelectedMonth(next.value); else setSelectedMonth(ALL_TIME);
   }
 
   const cashflowData = (cashflow.data?.months ?? []).map((m) => ({
@@ -139,6 +506,15 @@ export default function Dashboard() {
     ? MONTH_OPTIONS.find((m) => m.value === selectedMonth)?.label ?? selectedMonth
     : "Last 12 months";
 
+  function openDrill(type: DrillType) {
+    setDrill({
+      type,
+      startDate: dateRange?.startDate,
+      endDate: dateRange?.endDate,
+      label: selectedLabel,
+    });
+  }
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -148,7 +524,6 @@ export default function Dashboard() {
           <p className="text-sm text-muted-foreground mt-0.5">{isMonthly ? selectedLabel : (s?.periodLabel ?? "Loading...")}</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Month navigator */}
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => stepMonth(-1)} disabled={!canGoBack} title="Previous month">
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -167,7 +542,6 @@ export default function Dashboard() {
             <ChevronRight className="h-4 w-4" />
           </Button>
 
-          {/* Forecast pill — only for current/all-time view */}
           {!isMonthly && f && (
             <div className="text-right bg-card border border-card-border rounded-lg px-4 py-2 hidden lg:block">
               <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
@@ -177,7 +551,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Forecast bar for mobile / monthly view */}
       {!isMonthly && f && (
         <div className="bg-card border border-card-border rounded-lg px-4 py-2 lg:hidden">
           <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
@@ -193,10 +566,26 @@ export default function Dashboard() {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="kpi-grid">
-          <MetricCard label="Total Income" value={formatCurrency(s?.totalIncome ?? 0)} positive={true} />
-          <MetricCard label="Total Expenses" value={formatCurrency(s?.totalExpenses ?? 0)} positive={false} />
-          <MetricCard label="Net Cashflow" value={formatCurrency(s?.netCashflow ?? 0)} positive={(s?.netCashflow ?? 0) >= 0} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <MetricCard
+            label="Total Income"
+            value={formatCurrency(s?.totalIncome ?? 0)}
+            positive={true}
+            onClick={() => openDrill("income")}
+            hint="Click to see income by category"
+          />
+          <MetricCard
+            label="Total Expenses"
+            value={formatCurrency(s?.totalExpenses ?? 0)}
+            positive={false}
+            onClick={() => openDrill("expenses")}
+            hint="Click to see expenses by category"
+          />
+          <MetricCard
+            label="Net Cashflow"
+            value={formatCurrency(s?.netCashflow ?? 0)}
+            positive={(s?.netCashflow ?? 0) >= 0}
+          />
           <MetricCard
             label="Savings Rate"
             value={`${(s?.savingsRate ?? 0).toFixed(1)}%`}
@@ -208,8 +597,7 @@ export default function Dashboard() {
 
       {/* Cashflow Chart + AI Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Cashflow Chart — always 12-month rolling for context */}
-        <div className="lg:col-span-2 bg-card border border-card-border rounded-lg p-4" data-testid="cashflow-chart">
+        <div className="lg:col-span-2 bg-card border border-card-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cash Flow — Last 12 Months</h2>
             {cashflow.data && (
@@ -257,8 +645,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* AI Insights */}
-        <div className="bg-card border border-card-border rounded-lg p-4" data-testid="ai-insights">
+        <div className="bg-card border border-card-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">AI Insights</h2>
             <Link href="/ai-advisor" className="text-xs text-primary hover:underline flex items-center gap-1">
@@ -289,11 +676,19 @@ export default function Dashboard() {
 
       {/* Spending Categories + Accounts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Spending by Category */}
-        <div className="bg-card border border-card-border rounded-lg p-4" data-testid="spending-categories">
-          <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-            Spending by Category{isMonthly ? ` — ${selectedLabel}` : ""}
-          </h2>
+        {/* Spending by Category — clickable slices */}
+        <div className="bg-card border border-card-border rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+              Spending by Category{isMonthly ? ` — ${selectedLabel}` : ""}
+            </h2>
+            <button
+              onClick={() => openDrill("expenses")}
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              View all <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
           {categories.isLoading ? (
             <div className="h-48 animate-pulse bg-muted rounded" />
           ) : pieData.length === 0 ? (
@@ -302,7 +697,22 @@ export default function Dashboard() {
             <div className="flex gap-4 items-center">
               <ResponsiveContainer width="50%" height={180}>
                 <PieChart>
-                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={2}>
+                  <Pie
+                    data={pieData}
+                    cx="50%" cy="50%"
+                    innerRadius={50} outerRadius={80}
+                    dataKey="value"
+                    paddingAngle={2}
+                    onClick={(entry: any) => {
+                      setDrill({
+                        type: "expenses",
+                        startDate: dateRange?.startDate,
+                        endDate: dateRange?.endDate,
+                        label: selectedLabel,
+                      });
+                    }}
+                    style={{ cursor: "pointer" }}
+                  >
                     {pieData.map((entry, index) => (
                       <Cell key={index} fill={entry.color} />
                     ))}
@@ -312,13 +722,24 @@ export default function Dashboard() {
               </ResponsiveContainer>
               <div className="flex-1 space-y-1.5">
                 {pieData.slice(0, 6).map((c, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs">
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setDrill({
+                        type: "expenses",
+                        startDate: dateRange?.startDate,
+                        endDate: dateRange?.endDate,
+                        label: selectedLabel,
+                      });
+                    }}
+                    className="w-full flex items-center justify-between text-xs hover:bg-muted/40 rounded px-1 py-0.5 -mx-1 transition-colors group"
+                  >
                     <div className="flex items-center gap-1.5">
                       <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: c.color }} />
-                      <span className="text-muted-foreground truncate max-w-[90px]">{c.name}</span>
+                      <span className="text-muted-foreground group-hover:text-foreground transition-colors truncate max-w-[90px]">{c.name}</span>
                     </div>
                     <span className="font-semibold text-foreground tabular-nums">{formatCurrency(c.value)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -326,7 +747,7 @@ export default function Dashboard() {
         </div>
 
         {/* Accounts */}
-        <div className="bg-card border border-card-border rounded-lg p-4" data-testid="accounts-summary">
+        <div className="bg-card border border-card-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Accounts</h2>
             <span className="text-xs text-muted-foreground/60">Click to drill in</span>
@@ -361,7 +782,7 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Transactions */}
-      <div className="bg-card border border-card-border rounded-lg p-4" data-testid="recent-transactions">
+      <div className="bg-card border border-card-border rounded-lg p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Recent Transactions</h2>
           <Link href="/transactions" className="text-xs text-primary hover:underline flex items-center gap-1">
@@ -389,6 +810,9 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Drill-down sheet */}
+      <DrillDownSheet drill={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }
