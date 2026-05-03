@@ -715,7 +715,7 @@ function MetricCard({
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [activeMode, setActiveMode] = useState<ActiveMode>("last-12m");
+  const [activeMode, setActiveMode] = useState<ActiveMode>("month-nav");
   const [navMonth, setNavMonth] = useState<string>(getCurrentMonth());
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
