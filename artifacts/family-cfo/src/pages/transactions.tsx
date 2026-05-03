@@ -10,7 +10,7 @@ import { useSearch } from "wouter";
 import {
   Search, Upload, RefreshCw, Repeat2, Clock, X,
   ChevronLeft, ChevronRight, Shuffle, Tag, Check, ChevronsUpDown,
-  AlertTriangle, Layers, Fingerprint, ArrowRight,
+  AlertTriangle, Layers, Fingerprint, ArrowRight, TrendingUp,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
