@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, RotateCcw, TrendingUp, HelpCircle, Home, Car } from "lucide-react";
+import { Send, RotateCcw, TrendingUp, HelpCircle, Home, Car, PieChart, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -10,10 +10,12 @@ interface Message {
 }
 
 const SUGGESTED_QUESTIONS = [
+  { icon: TrendingUp, text: "Am I investing enough each month?" },
+  { icon: PieChart, text: "Is my super vs shares split healthy?" },
   { icon: Car, text: "Can I afford a $25,000 car?" },
-  { icon: TrendingUp, text: "What happens if my income drops 20%?" },
   { icon: Home, text: "How soon can I be mortgage free?" },
-  { icon: HelpCircle, text: "How can I increase my savings rate?" },
+  { icon: ShieldCheck, text: "How can I increase my savings rate?" },
+  { icon: HelpCircle, text: "What happens if my income drops 20%?" },
 ];
 
 export default function AiAdvisor() {

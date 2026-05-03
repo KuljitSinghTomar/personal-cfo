@@ -2,24 +2,126 @@ import { Router } from "express";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { db } from "@workspace/db";
 import { transactionsTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { SendAiMessageBody } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 
 const router = Router();
 
-router.get("/ai/insights", async (req, res) => {
-  try {
-    const rows = await db.select({
+// ── Shared: detect fund type from description / category ─────────────────────
+const FUND_PATTERNS: { name: string; patterns: string[]; type: "super" | "shares" }[] = [
+  { name: "HostPlus", patterns: ["hostplus", "host plus"], type: "super" },
+  { name: "AustralianSuper", patterns: ["australiansuper", "australian super"], type: "super" },
+  { name: "UniSuper", patterns: ["unisuper"], type: "super" },
+  { name: "REST Super", patterns: ["rest super"], type: "super" },
+  { name: "CBUS", patterns: ["cbus super", "cbus"], type: "super" },
+  { name: "HESTA", patterns: ["hesta"], type: "super" },
+  { name: "Vanguard", patterns: ["vanguard"], type: "shares" },
+  { name: "BetaShares", patterns: ["betashares"], type: "shares" },
+  { name: "iShares", patterns: ["ishares"], type: "shares" },
+  { name: "Magellan", patterns: ["magellan"], type: "shares" },
+  { name: "CommSec", patterns: ["commsec"], type: "shares" },
+  { name: "Pearler", patterns: ["pearler"], type: "shares" },
+  { name: "Raiz", patterns: ["raiz"], type: "shares" },
+  { name: "Spaceship", patterns: ["spaceship"], type: "shares" },
+  { name: "Stake", patterns: ["stake"], type: "shares" },
+  { name: "Superhero", patterns: ["superhero"], type: "shares" },
+  { name: "nabtrade", patterns: ["nabtrade"], type: "shares" },
+];
+
+function detectFundType(description: string, category: string | null): "super" | "shares" {
+  const d = description.toLowerCase();
+  const c = (category ?? "").toLowerCase();
+  for (const f of FUND_PATTERNS) {
+    if (f.patterns.some((p) => d.includes(p) || c.includes(p))) return f.type;
+  }
+  if (c.includes("super")) return "super";
+  return "shares";
+}
+
+// ── Fetch investment summary from DB ─────────────────────────────────────────
+async function getInvestmentSummary() {
+  const rows = await db
+    .select({
       amount: transactionsTable.amount,
-      creditDebit: transactionsTable.creditDebit,
-      isTransfer: transactionsTable.isTransfer,
+      transactionDate: transactionsTable.transactionDate,
+      description: transactionsTable.description,
       categoryName: transactionsTable.categoryName,
       userCategory: transactionsTable.userCategory,
-      transactionDate: transactionsTable.transactionDate,
-      merchantName: transactionsTable.merchantName,
-    }).from(transactionsTable)
-      .where(and(eq(transactionsTable.included, true), eq(transactionsTable.isTransfer, false)));
+    })
+    .from(transactionsTable)
+    .where(
+      and(
+        eq(transactionsTable.isInvestment, true),
+        eq(transactionsTable.included, true),
+        eq(transactionsTable.creditDebit, "debit"),
+      )
+    )
+    .orderBy(desc(transactionsTable.transactionDate));
+
+  if (rows.length === 0) return null;
+
+  let totalInvested = 0;
+  let superTotal = 0;
+  let sharesTotal = 0;
+  const fundMap: Record<string, number> = {};
+  const monthlyMap: Record<string, number> = {};
+
+  for (const row of rows) {
+    const amount = parseFloat(row.amount);
+    totalInvested += amount;
+    const type = detectFundType(row.description, row.userCategory ?? row.categoryName);
+    if (type === "super") superTotal += amount;
+    else sharesTotal += amount;
+
+    // Track by fund description (simplified)
+    const fundKey = row.userCategory ?? row.categoryName ?? "Other";
+    fundMap[fundKey] = (fundMap[fundKey] ?? 0) + amount;
+
+    if (row.transactionDate) {
+      const month = row.transactionDate.substring(0, 7);
+      monthlyMap[month] = (monthlyMap[month] ?? 0) + amount;
+    }
+  }
+
+  const monthlyValues = Object.values(monthlyMap);
+  const avgMonthly = monthlyValues.length > 0
+    ? monthlyValues.reduce((s, v) => s + v, 0) / monthlyValues.length
+    : 0;
+
+  const topFunds = Object.entries(fundMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name, amount]) => ({ name, amount }));
+
+  return {
+    totalInvested,
+    superTotal,
+    sharesTotal,
+    avgMonthly,
+    contributionCount: rows.length,
+    topFunds,
+    monthCount: monthlyValues.length,
+  };
+}
+
+// ── GET /api/ai/insights ──────────────────────────────────────────────────────
+
+router.get("/ai/insights", async (req, res) => {
+  try {
+    const [rows, investmentSummary] = await Promise.all([
+      db.select({
+        amount: transactionsTable.amount,
+        creditDebit: transactionsTable.creditDebit,
+        isTransfer: transactionsTable.isTransfer,
+        isInvestment: transactionsTable.isInvestment,
+        categoryName: transactionsTable.categoryName,
+        userCategory: transactionsTable.userCategory,
+        transactionDate: transactionsTable.transactionDate,
+      }).from(transactionsTable)
+        .where(and(eq(transactionsTable.included, true), eq(transactionsTable.isTransfer, false))),
+      getInvestmentSummary(),
+    ]);
 
     const monthlyData: Record<string, { income: number; expenses: number }> = {};
     const categoryData: Record<string, number[]> = {};
@@ -29,8 +131,9 @@ router.get("/ai/insights", async (req, res) => {
       const month = row.transactionDate.substring(0, 7);
       if (!monthlyData[month]) monthlyData[month] = { income: 0, expenses: 0 };
       const amount = parseFloat(row.amount);
-      if (row.creditDebit === "credit") monthlyData[month].income += amount;
-      else {
+      if (row.creditDebit === "credit") {
+        monthlyData[month].income += amount;
+      } else if (!row.isInvestment) {
         monthlyData[month].expenses += amount;
         const cat = row.userCategory ?? row.categoryName ?? "Uncategorised";
         if (!categoryData[cat]) categoryData[cat] = [];
@@ -43,6 +146,9 @@ router.get("/ai/insights", async (req, res) => {
     const avgIncome = recentMonths.length > 0 ? recentMonths.reduce((s, m) => s + m.income, 0) / recentMonths.length : 0;
     const avgExpenses = recentMonths.length > 0 ? recentMonths.reduce((s, m) => s + m.expenses, 0) / recentMonths.length : 0;
     const savingsRate = avgIncome > 0 ? ((avgIncome - avgExpenses) / avgIncome) * 100 : 0;
+    const investmentRate = avgIncome > 0 && investmentSummary
+      ? (investmentSummary.avgMonthly / avgIncome) * 100
+      : 0;
 
     const topCategory = Object.entries(categoryData)
       .map(([cat, amounts]) => ({ cat, total: amounts.reduce((s, a) => s + a, 0) }))
@@ -50,25 +156,51 @@ router.get("/ai/insights", async (req, res) => {
 
     const insights = [];
 
+    // Investment insight — highest priority if we have data
+    if (investmentSummary && investmentSummary.totalInvested > 0) {
+      const superPct = investmentSummary.totalInvested > 0
+        ? ((investmentSummary.superTotal / investmentSummary.totalInvested) * 100).toFixed(0)
+        : 0;
+      insights.push({
+        id: randomUUID(),
+        type: "forecast" as const,
+        title: `Investing $${Math.round(investmentSummary.avgMonthly).toLocaleString()}/month`,
+        message: `You are putting ${investmentRate.toFixed(1)}% of your income into investments — $${Math.round(investmentSummary.avgMonthly).toLocaleString()}/month on average. ${superPct}% is super. Total contributed to date: $${Math.round(investmentSummary.totalInvested).toLocaleString()}.`,
+        impact: Math.round(investmentSummary.avgMonthly * 12),
+        priority: 1,
+      });
+
+      // Super concentration check
+      if (investmentSummary.superTotal > investmentSummary.sharesTotal * 3 && investmentSummary.sharesTotal > 0) {
+        insights.push({
+          id: randomUUID(),
+          type: "spending_pattern" as const,
+          title: "Portfolio is super-heavy",
+          message: `${((investmentSummary.superTotal / investmentSummary.totalInvested) * 100).toFixed(0)}% of your investments are in super — consider whether your outside-super allocation (shares/ETFs at $${Math.round(investmentSummary.sharesTotal).toLocaleString()}) matches your liquidity needs before retirement age.`,
+          impact: null,
+          priority: 2,
+        });
+      }
+    }
+
     if (savingsRate > 15 && avgIncome > 0) {
       insights.push({
         id: randomUUID(),
         type: "savings_opportunity" as const,
-        title: "SIP increase opportunity",
-        message: `Your average savings rate is ${savingsRate.toFixed(1)}%. You can safely increase your monthly SIP by $${Math.round((avgIncome - avgExpenses) * 0.1)} while maintaining a healthy emergency buffer.`,
+        title: "Strong savings runway",
+        message: `Your net savings rate is ${savingsRate.toFixed(1)}%. After investments, your effective surplus is $${Math.round(avgIncome - avgExpenses - (investmentSummary?.avgMonthly ?? 0))}/month — well-positioned for goal funding.`,
         impact: Math.round((avgIncome - avgExpenses) * 0.1),
-        priority: 1,
+        priority: 3,
       });
     }
 
-    const allExpensesAvg = recentMonths.length > 0 ? avgExpenses : 0;
     insights.push({
       id: randomUUID(),
       type: "spending_pattern" as const,
       title: "True average monthly spend",
-      message: `Based on your last ${recentMonths.length} months of data, your true average monthly spend is $${allExpensesAvg.toFixed(0)} — excluding interbank transfers.`,
+      message: `Based on your last ${recentMonths.length} months of data, your true average monthly spend (excluding investments and transfers) is $${avgExpenses.toFixed(0)}.`,
       impact: null,
-      priority: 2,
+      priority: 4,
     });
 
     if (topCategory) {
@@ -76,9 +208,9 @@ router.get("/ai/insights", async (req, res) => {
         id: randomUUID(),
         type: "spending_pattern" as const,
         title: `Top spending category: ${topCategory.cat}`,
-        message: `${topCategory.cat} is your largest expense category at $${topCategory.total.toFixed(0)} total. This accounts for ${((topCategory.total / (avgExpenses * recentMonths.length || 1)) * 100).toFixed(0)}% of all expenses tracked.`,
+        message: `${topCategory.cat} is your largest expense category at $${topCategory.total.toFixed(0)} total — ${((topCategory.total / (avgExpenses * recentMonths.length || 1)) * 100).toFixed(0)}% of all tracked expenses.`,
         impact: topCategory.total,
-        priority: 3,
+        priority: 5,
       });
     }
 
@@ -96,14 +228,14 @@ router.get("/ai/insights", async (req, res) => {
     insights.push({
       id: randomUUID(),
       type: "forecast" as const,
-      title: "End of year projection",
-      message: `At your current net savings rate of $${(avgIncome - avgExpenses).toFixed(0)}/month, you are on track to accumulate $${Math.round((avgIncome - avgExpenses) * 12).toLocaleString()} by year end.`,
+      title: "End-of-year projection",
+      message: `At your current net savings rate of $${(avgIncome - avgExpenses).toFixed(0)}/month, you will accumulate $${Math.round((avgIncome - avgExpenses) * 12).toLocaleString()} in savings by year end — on top of $${Math.round((investmentSummary?.avgMonthly ?? 0) * 12).toLocaleString()} in new investments.`,
       impact: Math.round((avgIncome - avgExpenses) * 12),
-      priority: 4,
+      priority: 6,
     });
 
     res.json({
-      insights: insights.slice(0, 5),
+      insights: insights.sort((a, b) => a.priority - b.priority).slice(0, 5),
       generatedAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -112,54 +244,105 @@ router.get("/ai/insights", async (req, res) => {
   }
 });
 
+// ── POST /api/ai/chat ─────────────────────────────────────────────────────────
+
 router.post("/ai/chat", async (req, res) => {
   try {
     const body = SendAiMessageBody.parse(req.body);
     const { message, conversationHistory } = body;
 
-    const rows = await db.select({
-      amount: transactionsTable.amount,
-      creditDebit: transactionsTable.creditDebit,
-      isTransfer: transactionsTable.isTransfer,
-      categoryName: transactionsTable.categoryName,
-      transactionDate: transactionsTable.transactionDate,
-    }).from(transactionsTable)
-      .where(and(eq(transactionsTable.included, true)));
+    // Fetch cash flow data and investment data in parallel
+    const [rows, investmentSummary] = await Promise.all([
+      db.select({
+        amount: transactionsTable.amount,
+        creditDebit: transactionsTable.creditDebit,
+        isTransfer: transactionsTable.isTransfer,
+        isInvestment: transactionsTable.isInvestment,
+        categoryName: transactionsTable.categoryName,
+        userCategory: transactionsTable.userCategory,
+        transactionDate: transactionsTable.transactionDate,
+      }).from(transactionsTable)
+        .where(and(eq(transactionsTable.included, true))),
+      getInvestmentSummary(),
+    ]);
 
     let totalIncome = 0;
     let totalExpenses = 0;
     const monthlyMap: Record<string, { income: number; expenses: number }> = {};
+    const categoryTotals: Record<string, number> = {};
 
     for (const row of rows) {
       if (row.isTransfer || !row.transactionDate) continue;
       const amount = parseFloat(row.amount);
       const month = row.transactionDate.substring(0, 7);
       if (!monthlyMap[month]) monthlyMap[month] = { income: 0, expenses: 0 };
+
       if (row.creditDebit === "credit") {
         totalIncome += amount;
         monthlyMap[month].income += amount;
-      } else {
+      } else if (!row.isInvestment) {
         totalExpenses += amount;
         monthlyMap[month].expenses += amount;
+        const cat = row.userCategory ?? row.categoryName ?? "Uncategorised";
+        categoryTotals[cat] = (categoryTotals[cat] ?? 0) + amount;
       }
     }
 
     const months = Object.values(monthlyMap);
     const avgIncome = months.length > 0 ? months.reduce((s, m) => s + m.income, 0) / months.length : 0;
     const avgExpenses = months.length > 0 ? months.reduce((s, m) => s + m.expenses, 0) / months.length : 0;
-    const monthlySurplus = avgIncome - avgExpenses;
-    const savingsRate = avgIncome > 0 ? ((monthlySurplus / avgIncome) * 100) : 0;
+    const monthlySurplus = avgIncome - avgExpenses - (investmentSummary?.avgMonthly ?? 0);
+    const savingsRate = avgIncome > 0 ? ((avgIncome - avgExpenses) / avgIncome) * 100 : 0;
+    const investmentRate = avgIncome > 0 && investmentSummary
+      ? (investmentSummary.avgMonthly / avgIncome) * 100
+      : 0;
 
-    const systemPrompt = `You are a Personal CFO for a family in Australia. You have access to their real financial data:
-- Average monthly income: $${avgIncome.toFixed(0)} AUD
-- Average monthly expenses: $${avgExpenses.toFixed(0)} AUD
-- Average monthly surplus: $${monthlySurplus.toFixed(0)} AUD
-- Savings rate: ${savingsRate.toFixed(1)}%
-- Data spans ${months.length} months
+    // Top 5 spending categories
+    const topCategories = Object.entries(categoryTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([cat, total]) => `  - ${cat}: $${Math.round(total).toLocaleString()}`)
+      .join("\n");
 
-You provide clear, decisive, financially sophisticated advice. You are direct and analytical — not generic. 
-Always answer based on the real numbers above. When the user asks "can I afford X", calculate it against their surplus.
-Keep answers concise but insightful. Use AUD currency. Never hedge unnecessarily.`;
+    // Investment section of prompt
+    let investmentSection = "- No investment transactions detected yet.";
+    if (investmentSummary && investmentSummary.totalInvested > 0) {
+      const superPct = ((investmentSummary.superTotal / investmentSummary.totalInvested) * 100).toFixed(0);
+      const sharesPct = ((investmentSummary.sharesTotal / investmentSummary.totalInvested) * 100).toFixed(0);
+      const fundLines = investmentSummary.topFunds
+        .map(f => `  - ${f.name}: $${Math.round(f.amount).toLocaleString()}`)
+        .join("\n");
+      investmentSection = `- Total invested (all time): $${Math.round(investmentSummary.totalInvested).toLocaleString()} AUD across ${investmentSummary.contributionCount} contributions
+- Super contributions: $${Math.round(investmentSummary.superTotal).toLocaleString()} (${superPct}% of portfolio)
+- Shares / ETFs: $${Math.round(investmentSummary.sharesTotal).toLocaleString()} (${sharesPct}% of portfolio)
+- Average monthly investment: $${Math.round(investmentSummary.avgMonthly).toLocaleString()} (${investmentRate.toFixed(1)}% of income)
+- Investment categories tracked:
+${fundLines}`;
+    }
+
+    const systemPrompt = `You are a Personal CFO for an Australian family. You have access to their real financial data and must use it to give specific, numbers-driven advice.
+
+## Cash Flow (monthly averages over ${months.length} months)
+- Average monthly income: $${Math.round(avgIncome).toLocaleString()} AUD
+- Average monthly expenses (excl. investments): $${Math.round(avgExpenses).toLocaleString()} AUD
+- Average monthly investments: $${Math.round(investmentSummary?.avgMonthly ?? 0).toLocaleString()} AUD
+- True monthly surplus (after all outgoings + investments): $${Math.round(monthlySurplus).toLocaleString()} AUD
+- Savings rate (income minus expenses): ${savingsRate.toFixed(1)}%
+- Investment rate (investments as % of income): ${investmentRate.toFixed(1)}%
+
+## Top Spending Categories (all time)
+${topCategories || "  - No category data available"}
+
+## Investment Portfolio
+${investmentSection}
+
+## Advice Guidelines
+- Be direct, specific and analytical — use the real numbers above, not generic rules
+- When asked "can I afford X", calculate it against the true monthly surplus of $${Math.round(monthlySurplus).toLocaleString()}
+- When asked about super, reference their actual super balance and contribution rate
+- When asked about investment diversification, comment on their super vs shares split
+- Factor in that super is locked until preservation age (~60) when discussing liquidity
+- All currency in AUD. No unnecessary hedging. Keep answers concise but insightful.`;
 
     const chatMessages = [
       ...conversationHistory.map((m) => ({
