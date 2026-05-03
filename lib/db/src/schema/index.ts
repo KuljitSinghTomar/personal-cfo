@@ -21,3 +21,4 @@ export * from "./transactions";
 export * from "./budget-goals";
 export * from "./net-worth";
 export * from "./category-rules";
+export * from "./account-preferences";

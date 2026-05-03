@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, ReceiptText, Bot, LineChart, Target, TrendingUp, Zap, PieChart } from "lucide-react";
+import { LayoutDashboard, ReceiptText, Bot, LineChart, Target, TrendingUp, Zap, PieChart, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -11,6 +11,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     { href: "/budget", label: "Budget Goals", icon: Target },
     { href: "/net-worth", label: "Net Worth", icon: TrendingUp },
     { href: "/investments", label: "Investments", icon: PieChart },
+    { href: "/accounts", label: "Accounts", icon: Building2 },
     { href: "/scenarios", label: "Scenarios", icon: LineChart },
     { href: "/ai-advisor", label: "AI Advisor", icon: Bot },
     { href: "/category-rules", label: "Rules", icon: Zap },
