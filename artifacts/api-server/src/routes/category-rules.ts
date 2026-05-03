@@ -3,7 +3,8 @@ import { db } from "@workspace/db";
 import { categoryRulesTable, transactionsTable } from "@workspace/db";
 import { eq, isNull } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { z } from "zod/v4";
+
+const VALID_FIELDS = new Set(["merchant", "description", "category"]);
 
 const router = Router();
 
@@ -24,19 +25,16 @@ router.get("/category-rules", async (req, res) => {
 
 // ── Create a rule ─────────────────────────────────────────────────────────
 
-const CreateRuleBody = z.object({
-  matchPattern: z.string().min(1),
-  matchField: z.enum(["merchant", "description", "category"]),
-  category: z.string().min(1),
-});
-
 router.post("/category-rules", async (req, res) => {
   try {
-    const body = CreateRuleBody.parse(req.body);
+    const { matchPattern, matchField, category } = req.body as Record<string, string>;
+    if (!matchPattern?.trim() || !category?.trim() || !VALID_FIELDS.has(matchField)) {
+      return res.status(400).json({ error: "matchPattern, matchField and category are required" });
+    }
     const id = randomUUID();
     const [rule] = await db
       .insert(categoryRulesTable)
-      .values({ id, ...body, isActive: true })
+      .values({ id, matchPattern: matchPattern.trim(), matchField, category: category.trim(), isActive: true })
       .returning();
     res.json({ rule });
   } catch (err) {
@@ -47,17 +45,15 @@ router.post("/category-rules", async (req, res) => {
 
 // ── Update a rule (toggle active, edit pattern/field/category) ────────────
 
-const UpdateRuleBody = z.object({
-  matchPattern: z.string().min(1).optional(),
-  matchField: z.enum(["merchant", "description", "category"]).optional(),
-  category: z.string().min(1).optional(),
-  isActive: z.boolean().optional(),
-});
-
 router.patch("/category-rules/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const body = UpdateRuleBody.parse(req.body);
+    const raw = req.body as Record<string, unknown>;
+    const body: Record<string, unknown> = {};
+    if (typeof raw.matchPattern === "string" && raw.matchPattern.trim()) body.matchPattern = raw.matchPattern.trim();
+    if (typeof raw.matchField === "string" && VALID_FIELDS.has(raw.matchField)) body.matchField = raw.matchField;
+    if (typeof raw.category === "string" && raw.category.trim()) body.category = raw.category.trim();
+    if (typeof raw.isActive === "boolean") body.isActive = raw.isActive;
     const [rule] = await db
       .update(categoryRulesTable)
       .set({ ...body, updatedAt: new Date() })

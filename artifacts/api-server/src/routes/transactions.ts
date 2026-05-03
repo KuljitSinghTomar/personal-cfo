@@ -16,6 +16,29 @@ import { syncNetWorthFromTransactions } from "./net-worth";
 // ── Transfer pair-matching engine ─────────────────────────────────────────
 
 export async function redetectTransfers(log?: any): Promise<{ matched: number; reset: number }> {
+  // ── Step 1: Loan/mortgage account credits ────────────────────────────────────
+  // When money hits a loan account as "transfer_incoming" the bank is recording
+  // a repayment. Always exclude from income — no pair needed.
+  // The debit leg on the offset/savings account is the real expense.
+  await db
+    .update(transactionsTable)
+    .set({ isTransfer: true })
+    .where(
+      and(
+        eq(transactionsTable.transactionType, "transfer_incoming"),
+        or(
+          ilike(transactionsTable.accountName, "%loan%"),
+          ilike(transactionsTable.accountName, "%mortgage%"),
+        )
+      )
+    );
+
+  // ── Step 2: Category-confirmed pair-matching ─────────────────────────────────
+  // Only include transactions where the CATEGORY explicitly says "transfer" or
+  // "credit card payment". We do NOT rely on transaction_type alone because
+  // payroll deposits (type=transfer_incoming, category=Salary/Regular Income)
+  // must never be matched as transfers — they are real external income.
+  // Loan accounts are excluded here (handled above in Step 1).
   const candidates = await db
     .select({
       id: transactionsTable.id,
@@ -23,20 +46,22 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
       creditDebit: transactionsTable.creditDebit,
       transactionDate: transactionsTable.transactionDate,
       accountNumber: transactionsTable.accountNumber,
-      transactionType: transactionsTable.transactionType,
     })
     .from(transactionsTable)
     .where(
-      or(
-        eq(transactionsTable.transactionType, "transfer_incoming"),
-        eq(transactionsTable.transactionType, "transfer_outgoing"),
-        ilike(transactionsTable.categoryName, "%transfer%"),
-        ilike(transactionsTable.categoryName, "%credit card payment%"),
+      and(
+        or(
+          ilike(transactionsTable.categoryName, "%transfer%"),
+          ilike(transactionsTable.categoryName, "%credit card payment%"),
+        ),
+        sql`lower(${transactionsTable.accountName}) not like '%loan%'`,
+        sql`lower(${transactionsTable.accountName}) not like '%mortgage%'`,
       )
     );
 
   if (candidates.length === 0) return { matched: 0, reset: 0 };
 
+  // Reset all candidates to false, then re-mark only confirmed pairs
   const candidateIds = candidates.map((c) => c.id);
   await db.update(transactionsTable).set({ isTransfer: false }).where(inArray(transactionsTable.id, candidateIds));
 
