@@ -446,8 +446,8 @@ export default function Transactions() {
   const urlParams = new URLSearchParams(search);
   const urlAccount = urlParams.get("account") ?? "";
 
-  const [activeTab, setActiveTab] = useState<"transactions" | "transfers">(
-    (urlParams.get("tab") as "transactions" | "transfers") ?? "transactions"
+  const [activeTab, setActiveTab] = useState<"transactions" | "transfers" | "investments">(
+    (urlParams.get("tab") as "transactions" | "transfers" | "investments") ?? "transactions"
   );
   const [page, setPage] = useState(1);
   const [searchText, setSearchText] = useState("");
@@ -493,7 +493,8 @@ export default function Transactions() {
     category: activeTab === "transactions" ? (category === "All Categories" ? undefined : category) : undefined,
     accountName: activeTab === "transactions" ? (accountName || undefined) : undefined,
     creditDebit: activeTab === "transactions" ? (creditDebit === "all" ? undefined : creditDebit) : undefined,
-    isTransfer: activeTab === "transfers",
+    isTransfer: activeTab === "transfers" ? true : undefined,
+    isInvestment: activeTab === "investments" ? true : undefined,
   };
 
   const transactions = useListTransactions(params, { query: { queryKey: getListTransactionsQueryKey(params) } });
@@ -509,6 +510,19 @@ export default function Transactions() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
       toast({ title: "Transfer re-detection complete", description: data.message });
+    },
+    onError: () => toast({ title: "Re-detection failed", variant: "destructive" }),
+  });
+
+  const redetectInvestmentsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`${BASE}api/transactions/redetect-investments`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json() as Promise<{ marked: number; message: string }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+      toast({ title: "Investment re-detection complete", description: data.message });
     },
     onError: () => toast({ title: "Re-detection failed", variant: "destructive" }),
   });
@@ -639,6 +653,12 @@ export default function Transactions() {
               Re-detect transfers
             </Button>
           )}
+          {activeTab === "investments" && (
+            <Button variant="outline" size="sm" onClick={() => redetectInvestmentsMutation.mutate()} disabled={redetectInvestmentsMutation.isPending} className="flex items-center gap-1.5">
+              {redetectInvestmentsMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <TrendingUp className="w-3.5 h-3.5" />}
+              Re-detect investments
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importMutation.isPending} className="flex items-center gap-1.5">
             {importMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             Import CSV
@@ -660,9 +680,13 @@ export default function Transactions() {
         >
           <Repeat2 className="w-3.5 h-3.5" />
           Transfers
-          {activeTab !== "transfers" && transactions.data && (
-            <span className="text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 leading-none" />
-          )}
+        </button>
+        <button
+          onClick={() => { setActiveTab("investments"); setPage(1); }}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${activeTab === "investments" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        >
+          <TrendingUp className="w-3.5 h-3.5" />
+          Investments
         </button>
       </div>
 
@@ -931,6 +955,109 @@ export default function Transactions() {
 
           {!groupedLoading && groupedTransfers && groupedTransfers.totalPairs === 0 && groupedTransfers.totalUnpaired === 0 && (
             <p className="text-center text-muted-foreground py-12 text-sm">No transfers found.</p>
+          )}
+        </>
+      )}
+
+      {/* ── Investments tab ── */}
+      {activeTab === "investments" && (
+        <>
+          <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg px-4 py-3 text-sm text-purple-300 flex items-start gap-2">
+            <TrendingUp className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Investment tracking</p>
+              <p className="text-xs text-purple-300/70 mt-0.5">These are super contributions, ETFs, shares and managed funds — excluded from expenses and shown as their own category. Use <span className="font-medium">Re-detect investments</span> to refresh auto-detection.</p>
+            </div>
+          </div>
+
+          <div className="bg-card border border-card-border rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Date</th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Description</th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Account</th>
+                    <th className="text-left py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Category</th>
+                    <th className="text-right py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Amount</th>
+                    <th className="text-right py-2.5 px-3 text-muted-foreground font-medium uppercase tracking-widest">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.isLoading ? (
+                    [...Array(8)].map((_, i) => (
+                      <tr key={i} className="border-b border-border">
+                        {[...Array(6)].map((_, j) => (
+                          <td key={j} className="py-2.5 px-3"><div className="h-3 bg-muted rounded animate-pulse" /></td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : (transactions.data?.transactions ?? []).length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-muted-foreground">
+                        No investment transactions detected. Import a Frollo CSV or use Re-detect investments.
+                      </td>
+                    </tr>
+                  ) : (
+                    (transactions.data?.transactions ?? []).map((tx) => (
+                      <tr key={tx.id} className="border-b border-border hover:bg-muted/30 transition-colors">
+                        <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
+                        <td className="py-2.5 px-3 max-w-[220px]">
+                          <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
+                          {tx.merchantName && tx.merchantName !== "Unknown" && (
+                            <p className="text-muted-foreground text-xs">{tx.merchantName}</p>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">
+                          <p className="truncate max-w-[120px]">{tx.accountName}</p>
+                          <p className="text-muted-foreground/60">{tx.providerName}</p>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-xs">
+                            <TrendingUp className="w-2.5 h-2.5" />
+                            {tx.userCategory ?? tx.categoryName ?? "Investment"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-semibold tabular-nums whitespace-nowrap text-purple-400">
+                          -{formatCurrency(tx.amount)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            onClick={() => updateMutation.mutate(
+                              { id: tx.id, data: { isInvestment: false } },
+                              {
+                                onSuccess: () => {
+                                  queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+                                  toast({ title: "Moved to transactions", description: "Reclassified as a regular transaction" });
+                                },
+                              }
+                            )}
+                            className="text-xs px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1 ml-auto"
+                            title="Not an investment"
+                          >
+                            <X className="w-3 h-3" /> Not investment
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {(transactions.data?.totalPages ?? 1) > 1 && (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Page {page} of {transactions.data?.totalPages ?? 1}</span>
+              <div className="flex gap-1">
+                <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage((p) => Math.min(transactions.data?.totalPages ?? 1, p + 1))} disabled={page === (transactions.data?.totalPages ?? 1)}>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
           )}
         </>
       )}

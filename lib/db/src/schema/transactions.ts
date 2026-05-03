@@ -23,6 +23,7 @@ export const transactionsTable = pgTable("transactions", {
   userTags: jsonb("user_tags").$type<string[]>().default([]),
   notes: text("notes"),
   isTransfer: boolean("is_transfer").notNull().default(false),
+  isInvestment: boolean("is_investment").notNull().default(false),
   isRecurring: boolean("is_recurring").notNull().default(false),
   aiConfidenceScore: numeric("ai_confidence_score", { precision: 4, scale: 3 }),
   included: boolean("included").notNull().default(true),

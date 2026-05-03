@@ -10,10 +10,13 @@ import type { CategorySummary } from "./categorySummary";
 export interface DashboardSummary {
   totalIncome: number;
   totalExpenses: number;
+  totalInvested: number;
   netCashflow: number;
   savingsRate: number;
   transfersFiltered: number;
+  investmentsFiltered: number;
   transactionCount: number;
   periodLabel: string;
   topCategories: CategorySummary[];
+  topInvestmentCategories: CategorySummary[];
 }

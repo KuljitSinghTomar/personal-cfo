@@ -12,6 +12,7 @@ export interface UpdateTransactionBody {
   userTags?: string[];
   notes?: string | null;
   isTransfer?: boolean;
+  isInvestment?: boolean;
   isRecurring?: boolean;
   included?: boolean;
 }

@@ -13,6 +13,57 @@ import {
 import { autoGenerateBudgetGoals } from "./budget";
 import { syncNetWorthFromTransactions } from "./net-worth";
 
+// ── Investment detection engine ────────────────────────────────────────────
+
+const INVESTMENT_CATEGORY_PATTERNS = [
+  "super", "invest", "shares", "brokerage", "managed fund", "etf",
+];
+
+const INVESTMENT_DESCRIPTION_PATTERNS = [
+  "vanguard", "commsec", "pearler", "selfwealth", "raiz", "spaceship",
+  "nabtrade", "australiansuper", "hostplus", "host plus", "unisuper",
+  "rest super", "cbus", "hesta", "stake", "superhero", "betashares",
+  "ishares", "magellan", "argo invest", "afic",
+];
+
+function isInvestmentTransaction(categoryName: string | null, description: string): boolean {
+  const cat = (categoryName ?? "").toLowerCase();
+  const desc = description.toLowerCase();
+  return (
+    INVESTMENT_CATEGORY_PATTERNS.some((p) => cat.includes(p)) ||
+    INVESTMENT_DESCRIPTION_PATTERNS.some((p) => desc.includes(p))
+  );
+}
+
+export async function redetectInvestments(log?: any): Promise<{ marked: number }> {
+  // Reset all to false, then re-mark based on current patterns
+  await db.update(transactionsTable).set({ isInvestment: false }).where(
+    eq(transactionsTable.isInvestment, true)
+  );
+
+  const catConditions = INVESTMENT_CATEGORY_PATTERNS.map((p) =>
+    ilike(transactionsTable.categoryName, `%${p}%`)
+  );
+  const descConditions = INVESTMENT_DESCRIPTION_PATTERNS.map((p) =>
+    ilike(transactionsTable.description, `%${p}%`)
+  );
+
+  const result = await db.update(transactionsTable)
+    .set({ isInvestment: true })
+    .where(
+      and(
+        eq(transactionsTable.creditDebit, "debit"),
+        eq(transactionsTable.included, true),
+        or(...catConditions, ...descConditions),
+      )
+    )
+    .returning({ id: transactionsTable.id });
+
+  const marked = result.length;
+  log?.info({ marked }, "Investment re-detection complete");
+  return { marked };
+}
+
 // ── Transfer pair-matching engine ─────────────────────────────────────────
 
 export async function redetectTransfers(log?: any): Promise<{ matched: number; reset: number }> {
@@ -206,8 +257,10 @@ router.get("/transactions", async (req, res) => {
     else if (rawQuery.isTransfer === "true") rawQuery.isTransfer = true;
     if (rawQuery.isRecurring === "false") rawQuery.isRecurring = false;
     else if (rawQuery.isRecurring === "true") rawQuery.isRecurring = true;
+    if (rawQuery.isInvestment === "false") rawQuery.isInvestment = false;
+    else if (rawQuery.isInvestment === "true") rawQuery.isInvestment = true;
     const query = ListTransactionsQueryParams.parse(rawQuery);
-    const { page, limit, startDate, endDate, category, accountName, search, creditDebit, isTransfer, isRecurring } = query;
+    const { page, limit, startDate, endDate, category, accountName, search, creditDebit, isTransfer, isRecurring, isInvestment } = query;
 
     const conditions = [];
     if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
@@ -217,6 +270,7 @@ router.get("/transactions", async (req, res) => {
     if (creditDebit) conditions.push(eq(transactionsTable.creditDebit, creditDebit));
     if (isTransfer !== undefined) conditions.push(eq(transactionsTable.isTransfer, isTransfer));
     if (isRecurring !== undefined) conditions.push(eq(transactionsTable.isRecurring, isRecurring));
+    if (isInvestment !== undefined) conditions.push(eq(transactionsTable.isInvestment, isInvestment));
     if (search) {
       conditions.push(or(
         ilike(transactionsTable.description, `%${search}%`),
@@ -354,6 +408,8 @@ router.post("/transactions/import", async (req, res) => {
         const merchantName = row["merchant_name"] || null;
         const description = row["description"] ?? "";
         const categoryName = row["category_name"] || null;
+        const csvCreditDebit = row["credit_debit"] === "credit" ? "credit" : "debit";
+        const csvIsInvestment = csvCreditDebit === "debit" && isInvestmentTransaction(categoryName, description);
 
         const existingRows = await db
           .select({ id: transactionsTable.id, userCategory: transactionsTable.userCategory })
@@ -380,6 +436,7 @@ router.post("/transactions/import", async (req, res) => {
           userTags,
           notes: row["notes"] || null,
           isTransfer: isTransferType || isTransferCategory,
+          isInvestment: csvIsInvestment,
           isRecurring: false,
           aiConfidenceScore: "0.85",
           included,
@@ -407,6 +464,7 @@ router.post("/transactions/import", async (req, res) => {
       req.log.warn({ err: e }, "Transfer re-detection failed (non-fatal)");
     }
 
+    redetectInvestments(req.log).catch((e) => req.log.warn({ err: e }, "Investment re-detection failed (non-fatal)"));
     syncNetWorthFromTransactions(req.log).catch((e) => req.log.warn({ err: e }, "Net worth sync failed"));
     autoGenerateBudgetGoals(req.log).catch((e) => req.log.warn({ err: e }, "Auto-generate budgets failed"));
 
@@ -430,6 +488,18 @@ router.post("/transactions/redetect-transfers", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to re-detect transfers");
     res.status(500).json({ error: "Failed to re-detect transfers" });
+  }
+});
+
+// ── Re-detect investments ──────────────────────────────────────────────────
+
+router.post("/transactions/redetect-investments", async (req, res) => {
+  try {
+    const result = await redetectInvestments(req.log);
+    res.json({ marked: result.marked, message: `Investment re-detection complete: ${result.marked} transactions marked` });
+  } catch (err) {
+    req.log.error({ err }, "Failed to re-detect investments");
+    res.status(500).json({ error: "Failed to re-detect investments" });
   }
 });
 
@@ -567,6 +637,7 @@ router.patch("/transactions/:id", async (req, res) => {
     if (body.userTags !== undefined) updateData.userTags = body.userTags;
     if (body.notes !== undefined) updateData.notes = body.notes;
     if (body.isTransfer !== undefined) updateData.isTransfer = body.isTransfer;
+    if (body.isInvestment !== undefined) updateData.isInvestment = body.isInvestment;
     if (body.isRecurring !== undefined) updateData.isRecurring = body.isRecurring;
     if (body.included !== undefined) updateData.included = body.included;
 
@@ -601,6 +672,7 @@ function serializeTransaction(tx: typeof transactionsTable.$inferSelect) {
     userTags: (tx.userTags as string[]) ?? [],
     notes: tx.notes ?? null,
     isTransfer: tx.isTransfer,
+    isInvestment: tx.isInvestment,
     isRecurring: tx.isRecurring,
     aiConfidenceScore: tx.aiConfidenceScore ? parseFloat(tx.aiConfidenceScore) : null,
     included: tx.included,

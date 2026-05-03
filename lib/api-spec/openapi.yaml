@@ -80,6 +80,10 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: isInvestment
+          in: query
+          schema:
+            type: boolean
         - name: isRecurring
           in: query
           schema:
@@ -585,6 +589,8 @@ components:
           nullable: true
         isTransfer:
           type: boolean
+        isInvestment:
+          type: boolean
         isRecurring:
           type: boolean
         aiConfidenceScore:
@@ -609,6 +615,7 @@ components:
         - transactionType
         - providerName
         - isTransfer
+        - isInvestment
         - isRecurring
         - included
         - createdAt
@@ -655,6 +662,8 @@ components:
           nullable: true
         isTransfer:
           type: boolean
+        isInvestment:
+          type: boolean
         isRecurring:
           type: boolean
         included:
@@ -698,11 +707,15 @@ components:
           type: number
         totalExpenses:
           type: number
+        totalInvested:
+          type: number
         netCashflow:
           type: number
         savingsRate:
           type: number
         transfersFiltered:
+          type: integer
+        investmentsFiltered:
           type: integer
         transactionCount:
           type: integer
@@ -712,15 +725,22 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CategorySummary"
+        topInvestmentCategories:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategorySummary"
       required:
         - totalIncome
         - totalExpenses
+        - totalInvested
         - netCashflow
         - savingsRate
         - transfersFiltered
+        - investmentsFiltered
         - transactionCount
         - periodLabel
         - topCategories
+        - topInvestmentCategories
 
     CategorySummary:
       type: object
@@ -767,6 +787,8 @@ components:
           type: number
         expenses:
           type: number
+        investments:
+          type: number
         savings:
           type: number
         transfers:
@@ -775,6 +797,7 @@ components:
         - month
         - income
         - expenses
+        - investments
         - savings
         - transfers
 

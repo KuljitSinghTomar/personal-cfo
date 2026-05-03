@@ -10,6 +10,7 @@ export interface MonthlyData {
   month: string;
   income: number;
   expenses: number;
+  investments: number;
   savings: number;
   transfers: number;
 }

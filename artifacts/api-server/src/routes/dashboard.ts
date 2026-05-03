@@ -19,21 +19,35 @@ router.get("/dashboard/summary", async (req, res) => {
       amount: transactionsTable.amount,
       creditDebit: transactionsTable.creditDebit,
       isTransfer: transactionsTable.isTransfer,
+      isInvestment: transactionsTable.isInvestment,
       categoryName: transactionsTable.categoryName,
       userCategory: transactionsTable.userCategory,
     }).from(transactionsTable).where(and(...conditions));
 
     let totalIncome = 0;
     let totalExpenses = 0;
+    let totalInvested = 0;
     let transfersFiltered = 0;
+    let investmentsFiltered = 0;
 
     const categoryTotals: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
+    const investCategoryTotals: Record<string, number> = {};
+    const investCategoryCounts: Record<string, number> = {};
 
     for (const row of rows) {
       const amount = parseFloat(row.amount);
       if (row.isTransfer) {
         transfersFiltered++;
+        continue;
+      }
+      // Investments: debit transactions flagged as investments — their own bucket
+      if (row.isInvestment && row.creditDebit === "debit") {
+        investmentsFiltered++;
+        totalInvested += amount;
+        const cat = row.userCategory ?? row.categoryName ?? "Investments";
+        investCategoryTotals[cat] = (investCategoryTotals[cat] ?? 0) + amount;
+        investCategoryCounts[cat] = (investCategoryCounts[cat] ?? 0) + 1;
         continue;
       }
       const category = row.userCategory ?? row.categoryName ?? "Uncategorised";
@@ -46,7 +60,7 @@ router.get("/dashboard/summary", async (req, res) => {
       }
     }
 
-    const netCashflow = totalIncome - totalExpenses;
+    const netCashflow = totalIncome - totalExpenses - totalInvested;
     const savingsRate = totalIncome > 0 ? ((netCashflow / totalIncome) * 100) : 0;
 
     const topCategories = Object.entries(categoryTotals)
@@ -59,7 +73,15 @@ router.get("/dashboard/summary", async (req, res) => {
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 8);
 
-    const now = new Date();
+    const topInvestmentCategories = Object.entries(investCategoryTotals)
+      .map(([category, amount]) => ({
+        category,
+        amount,
+        count: investCategoryCounts[category] ?? 0,
+        percentage: totalInvested > 0 ? (amount / totalInvested) * 100 : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
     const periodLabel = startDate && endDate
       ? `${startDate} to ${endDate}`
       : `Last 12 months`;
@@ -67,12 +89,15 @@ router.get("/dashboard/summary", async (req, res) => {
     res.json({
       totalIncome,
       totalExpenses,
+      totalInvested,
       netCashflow,
       savingsRate,
       transfersFiltered,
+      investmentsFiltered,
       transactionCount: rows.length,
       periodLabel,
       topCategories,
+      topInvestmentCategories,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get dashboard summary");
@@ -89,21 +114,26 @@ router.get("/dashboard/cashflow", async (req, res) => {
       amount: transactionsTable.amount,
       creditDebit: transactionsTable.creditDebit,
       isTransfer: transactionsTable.isTransfer,
+      isInvestment: transactionsTable.isInvestment,
       transactionDate: transactionsTable.transactionDate,
     }).from(transactionsTable)
       .where(eq(transactionsTable.included, true));
 
-    const monthlyMap: Record<string, { income: number; expenses: number; transfers: number }> = {};
+    const monthlyMap: Record<string, { income: number; expenses: number; investments: number; transfers: number }> = {};
 
     for (const row of rows) {
       if (!row.transactionDate) continue;
       const monthKey = row.transactionDate.substring(0, 7);
       if (!monthlyMap[monthKey]) {
-        monthlyMap[monthKey] = { income: 0, expenses: 0, transfers: 0 };
+        monthlyMap[monthKey] = { income: 0, expenses: 0, investments: 0, transfers: 0 };
       }
       const amount = parseFloat(row.amount);
       if (row.isTransfer) {
         monthlyMap[monthKey].transfers += amount;
+        continue;
+      }
+      if (row.isInvestment && row.creditDebit === "debit") {
+        monthlyMap[monthKey].investments += amount;
         continue;
       }
       if (row.creditDebit === "credit") {
@@ -121,7 +151,8 @@ router.get("/dashboard/cashflow", async (req, res) => {
         month,
         income: data.income,
         expenses: data.expenses,
-        savings: data.income - data.expenses,
+        investments: data.investments,
+        savings: data.income - data.expenses - data.investments,
         transfers: data.transfers,
       };
     });
@@ -151,6 +182,7 @@ router.get("/dashboard/spending-by-category", async (req, res) => {
       eq(transactionsTable.included, true),
       eq(transactionsTable.creditDebit, "debit"),
       eq(transactionsTable.isTransfer, false),
+      eq(transactionsTable.isInvestment, false),
     ];
     if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
     if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
@@ -262,6 +294,7 @@ router.get("/dashboard/category-drilldown", async (req, res) => {
       eq(transactionsTable.included, true),
       eq(transactionsTable.creditDebit, creditDebit),
       eq(transactionsTable.isTransfer, false),
+      eq(transactionsTable.isInvestment, false),
     ];
     if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
     if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
@@ -315,12 +348,16 @@ router.get("/dashboard/forecast", async (req, res) => {
       amount: transactionsTable.amount,
       creditDebit: transactionsTable.creditDebit,
       isTransfer: transactionsTable.isTransfer,
+      isInvestment: transactionsTable.isInvestment,
       transactionDate: transactionsTable.transactionDate,
     }).from(transactionsTable)
       .where(and(eq(transactionsTable.included, true), eq(transactionsTable.isTransfer, false)));
 
-    const currentMonthRows = allRows.filter(r => r.transactionDate?.startsWith(currentMonth));
-    const historicalRows = allRows.filter(r => !r.transactionDate?.startsWith(currentMonth));
+    // Exclude investments from expense forecasting (they aren't variable spending)
+    const spendRows = allRows.filter(r => !r.isInvestment || r.creditDebit === "credit");
+
+    const currentMonthRows = spendRows.filter(r => r.transactionDate?.startsWith(currentMonth));
+    const historicalRows = spendRows.filter(r => !r.transactionDate?.startsWith(currentMonth));
 
     let currentMonthSpend = 0;
     let currentMonthIncome = 0;

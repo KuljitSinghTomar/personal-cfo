@@ -28,6 +28,7 @@ export interface Transaction {
   userTags: string[];
   notes?: string | null;
   isTransfer: boolean;
+  isInvestment: boolean;
   isRecurring: boolean;
   aiConfidenceScore?: number | null;
   included: boolean;

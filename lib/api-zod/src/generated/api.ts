@@ -30,6 +30,7 @@ export const ListTransactionsQueryParams = zod.object({
   search: zod.coerce.string().optional(),
   creditDebit: zod.enum(["credit", "debit"]).optional(),
   isTransfer: zod.coerce.boolean().optional(),
+  isInvestment: zod.coerce.boolean().optional(),
   isRecurring: zod.coerce.boolean().optional(),
 });
 
@@ -56,6 +57,7 @@ export const ListTransactionsResponse = zod.object({
       userTags: zod.array(zod.string()),
       notes: zod.string().nullish(),
       isTransfer: zod.boolean(),
+      isInvestment: zod.boolean(),
       isRecurring: zod.boolean(),
       aiConfidenceScore: zod.number().nullish(),
       included: zod.boolean(),
@@ -98,6 +100,7 @@ export const UpdateTransactionBody = zod.object({
   userTags: zod.array(zod.string()).optional(),
   notes: zod.string().nullish(),
   isTransfer: zod.boolean().optional(),
+  isInvestment: zod.boolean().optional(),
   isRecurring: zod.boolean().optional(),
   included: zod.boolean().optional(),
 });
@@ -123,6 +126,7 @@ export const UpdateTransactionResponse = zod.object({
   userTags: zod.array(zod.string()),
   notes: zod.string().nullish(),
   isTransfer: zod.boolean(),
+  isInvestment: zod.boolean(),
   isRecurring: zod.boolean(),
   aiConfidenceScore: zod.number().nullish(),
   included: zod.boolean(),
@@ -141,12 +145,22 @@ export const GetDashboardSummaryQueryParams = zod.object({
 export const GetDashboardSummaryResponse = zod.object({
   totalIncome: zod.number(),
   totalExpenses: zod.number(),
+  totalInvested: zod.number(),
   netCashflow: zod.number(),
   savingsRate: zod.number(),
   transfersFiltered: zod.number(),
+  investmentsFiltered: zod.number(),
   transactionCount: zod.number(),
   periodLabel: zod.string(),
   topCategories: zod.array(
+    zod.object({
+      category: zod.string(),
+      amount: zod.number(),
+      count: zod.number(),
+      percentage: zod.number(),
+    }),
+  ),
+  topInvestmentCategories: zod.array(
     zod.object({
       category: zod.string(),
       amount: zod.number(),
@@ -171,6 +185,7 @@ export const GetCashflowResponse = zod.object({
       month: zod.string(),
       income: zod.number(),
       expenses: zod.number(),
+      investments: zod.number(),
       savings: zod.number(),
       transfers: zod.number(),
     }),

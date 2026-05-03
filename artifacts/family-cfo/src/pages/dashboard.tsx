@@ -536,6 +536,7 @@ export default function Dashboard() {
     fullMonth: m.month,
     Income: m.income,
     Expenses: m.expenses,
+    Investments: m.investments,
     Savings: m.savings,
   }));
 
@@ -603,13 +604,13 @@ export default function Dashboard() {
 
       {/* KPI Row */}
       {summary.isLoading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[...Array(4)].map((_, i) => (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[...Array(5)].map((_, i) => (
             <div key={i} className="bg-card border border-card-border rounded-lg p-4 h-24 animate-pulse" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <MetricCard
             label="Total Income"
             value={formatCurrency(s?.totalIncome ?? 0)}
@@ -626,6 +627,21 @@ export default function Dashboard() {
             hint="Click to see expenses by category"
             change={isMonthly && prevSummary.data ? pctChange(s?.totalExpenses ?? 0, prevSummary.data.totalExpenses) : undefined}
             invertChange
+          />
+          <MetricCard
+            label="Total Invested"
+            value={formatCurrency(s?.totalInvested ?? 0)}
+            positive={true}
+            sub={
+              <a
+                href="/transactions?tab=investments"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                {s?.investmentsFiltered ?? 0} investment txns →
+              </a>
+            }
+            change={isMonthly && prevSummary.data ? pctChange(s?.totalInvested ?? 0, prevSummary.data.totalInvested) : undefined}
           />
           <MetricCard
             label="Net Cashflow"
@@ -718,6 +734,7 @@ export default function Dashboard() {
                     setDrill({ type: "expenses", startDate, endDate, label: d.fullMonth });
                   }}
                 />
+                <Bar dataKey="Investments" fill="#8b5cf6" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
                 <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
               </BarChart>
             </ResponsiveContainer>

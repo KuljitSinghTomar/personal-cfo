@@ -17,5 +17,6 @@ export type ListTransactionsParams = {
   search?: string;
   creditDebit?: ListTransactionsCreditDebit;
   isTransfer?: boolean;
+  isInvestment?: boolean;
   isRecurring?: boolean;
 };

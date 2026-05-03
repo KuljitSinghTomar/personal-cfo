@@ -38,6 +38,7 @@ export interface Transaction {
   userTags: string[];
   notes?: string | null;
   isTransfer: boolean;
+  isInvestment: boolean;
   isRecurring: boolean;
   aiConfidenceScore?: number | null;
   included: boolean;
@@ -59,6 +60,7 @@ export interface UpdateTransactionBody {
   userTags?: string[];
   notes?: string | null;
   isTransfer?: boolean;
+  isInvestment?: boolean;
   isRecurring?: boolean;
   included?: boolean;
 }
@@ -87,18 +89,22 @@ export interface CategorySummary {
 export interface DashboardSummary {
   totalIncome: number;
   totalExpenses: number;
+  totalInvested: number;
   netCashflow: number;
   savingsRate: number;
   transfersFiltered: number;
+  investmentsFiltered: number;
   transactionCount: number;
   periodLabel: string;
   topCategories: CategorySummary[];
+  topInvestmentCategories: CategorySummary[];
 }
 
 export interface MonthlyData {
   month: string;
   income: number;
   expenses: number;
+  investments: number;
   savings: number;
   transfers: number;
 }
@@ -389,6 +395,7 @@ export type ListTransactionsParams = {
   search?: string;
   creditDebit?: ListTransactionsCreditDebit;
   isTransfer?: boolean;
+  isInvestment?: boolean;
   isRecurring?: boolean;
 };
 
