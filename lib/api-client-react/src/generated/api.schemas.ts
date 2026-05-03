@@ -414,6 +414,8 @@ export type GetDashboardSummaryParams = {
 
 export type GetCashflowParams = {
   months?: number;
+  startDate?: string;
+  endDate?: string;
 };
 
 export type GetSpendingByCategoryParams = {

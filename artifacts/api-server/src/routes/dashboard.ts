@@ -109,6 +109,12 @@ router.get("/dashboard/cashflow", async (req, res) => {
   try {
     const query = GetCashflowQueryParams.parse(req.query);
     const months = query.months ?? 12;
+    const startDate = query.startDate;
+    const endDate = query.endDate;
+
+    const conditions = [eq(transactionsTable.included, true)];
+    if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
+    if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
 
     const rows = await db.select({
       amount: transactionsTable.amount,
@@ -117,7 +123,7 @@ router.get("/dashboard/cashflow", async (req, res) => {
       isInvestment: transactionsTable.isInvestment,
       transactionDate: transactionsTable.transactionDate,
     }).from(transactionsTable)
-      .where(eq(transactionsTable.included, true));
+      .where(and(...conditions));
 
     const monthlyMap: Record<string, { income: number; expenses: number; investments: number; transfers: number }> = {};
 
@@ -143,7 +149,10 @@ router.get("/dashboard/cashflow", async (req, res) => {
       }
     }
 
-    const sortedMonths = Object.keys(monthlyMap).sort().slice(-months);
+    // When explicit date range is set, use all months in range; otherwise use last N months
+    const sortedMonths = (startDate || endDate)
+      ? Object.keys(monthlyMap).sort()
+      : Object.keys(monthlyMap).sort().slice(-months);
 
     const monthsData = sortedMonths.map((month) => {
       const data = monthlyMap[month];

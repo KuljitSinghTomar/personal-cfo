@@ -8,4 +8,6 @@
 
 export type GetCashflowParams = {
   months?: number;
+  startDate?: string;
+  endDate?: string;
 };

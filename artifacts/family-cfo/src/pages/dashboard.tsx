@@ -20,10 +20,9 @@ import {
 } from "recharts";
 import {
   TrendingUp, ArrowRight, AlertTriangle, Lightbulb, Info, CheckCircle,
-  ChevronLeft, ChevronRight, ChevronDown, ExternalLink,
+  ChevronLeft, ChevronRight, ChevronDown, ExternalLink, Calendar,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
@@ -39,16 +38,79 @@ function formatCurrencyFull(amount: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 2 }).format(amount);
 }
 
-function getLast18Months() {
-  const months: { value: string; label: string }[] = [];
+// ── Date range presets ─────────────────────────────────────────────────────
+
+type DatePreset = "this-month" | "last-month" | "last-3m" | "last-6m" | "this-fy" | "last-fy" | "last-12m" | "all-time" | "custom";
+
+const PRESETS: { id: DatePreset; label: string }[] = [
+  { id: "this-month", label: "This Month" },
+  { id: "last-month", label: "Last Month" },
+  { id: "last-3m", label: "Last 3 Months" },
+  { id: "last-6m", label: "Last 6 Months" },
+  { id: "this-fy", label: "This FY" },
+  { id: "last-fy", label: "Last FY" },
+  { id: "last-12m", label: "Last 12 Months" },
+  { id: "all-time", label: "All Time" },
+  { id: "custom", label: "Custom…" },
+];
+
+function fmtDate(d: Date) { return d.toISOString().substring(0, 10); }
+
+function getAuFyStartYear() {
   const now = new Date();
-  for (let i = 0; i < 18; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const value = d.toISOString().substring(0, 7);
-    const label = d.toLocaleString("en-AU", { month: "long", year: "numeric" });
-    months.push({ value, label });
+  return now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+function getPresetRange(preset: DatePreset): { startDate?: string; endDate?: string } {
+  const today = new Date();
+  const todayStr = fmtDate(today);
+  const fyYear = getAuFyStartYear();
+  switch (preset) {
+    case "this-month": {
+      return { startDate: fmtDate(new Date(today.getFullYear(), today.getMonth(), 1)), endDate: todayStr };
+    }
+    case "last-month": {
+      return {
+        startDate: fmtDate(new Date(today.getFullYear(), today.getMonth() - 1, 1)),
+        endDate: fmtDate(new Date(today.getFullYear(), today.getMonth(), 0)),
+      };
+    }
+    case "last-3m": {
+      return { startDate: fmtDate(new Date(today.getFullYear(), today.getMonth() - 3, 1)), endDate: todayStr };
+    }
+    case "last-6m": {
+      return { startDate: fmtDate(new Date(today.getFullYear(), today.getMonth() - 6, 1)), endDate: todayStr };
+    }
+    case "this-fy": {
+      return { startDate: `${fyYear}-07-01`, endDate: todayStr };
+    }
+    case "last-fy": {
+      return { startDate: `${fyYear - 1}-07-01`, endDate: `${fyYear}-06-30` };
+    }
+    case "last-12m": {
+      return { startDate: fmtDate(new Date(today.getFullYear(), today.getMonth() - 12, 1)), endDate: todayStr };
+    }
+    default: return {};
   }
-  return months;
+}
+
+function getPresetLabel(preset: DatePreset, customStart?: string, customEnd?: string): string {
+  const today = new Date();
+  const fyYear = getAuFyStartYear();
+  switch (preset) {
+    case "this-month": return today.toLocaleString("en-AU", { month: "long", year: "numeric" });
+    case "last-month": {
+      const d = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      return d.toLocaleString("en-AU", { month: "long", year: "numeric" });
+    }
+    case "last-3m": return "Last 3 Months";
+    case "last-6m": return "Last 6 Months";
+    case "this-fy": return `FY${fyYear}/${String(fyYear + 1).slice(2)}`;
+    case "last-fy": return `FY${fyYear - 1}/${String(fyYear).slice(2)}`;
+    case "last-12m": return "Last 12 Months";
+    case "all-time": return "All Time";
+    case "custom": return (customStart || customEnd) ? `${customStart ?? "?"} → ${customEnd ?? "?"}` : "Custom Range";
+  }
 }
 
 function getMonthDateRange(month: string) {
@@ -57,13 +119,6 @@ function getMonthDateRange(month: string) {
   const lastDay = new Date(year!, m!, 0).getDate();
   const end = `${month}-${String(lastDay).padStart(2, "0")}`;
   return { startDate: start, endDate: end };
-}
-
-function getPrevMonthKey(month: string) {
-  const [year, m] = month.split("-").map(Number);
-  const d = new Date(year!, m! - 1, 1);
-  d.setMonth(d.getMonth() - 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function pctChange(current: number, prev: number): number | undefined {
@@ -79,8 +134,6 @@ function InsightIcon({ type }: { type: string }) {
   return <Lightbulb className="w-4 h-4 text-primary flex-shrink-0" />;
 }
 
-const MONTH_OPTIONS = getLast18Months();
-const ALL_TIME = "__all__";
 
 // ── Drilldown types ────────────────────────────────────────────────────────
 
@@ -484,30 +537,41 @@ function MetricCard({
 // ── Main Dashboard ─────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [selectedMonth, setSelectedMonth] = useState<string>(ALL_TIME);
+  const [selectedPreset, setSelectedPreset] = useState<DatePreset>("last-12m");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [drill, setDrill] = useState<DrillState | null>(null);
 
-  const isMonthly = selectedMonth !== ALL_TIME;
-  const dateRange = isMonthly ? getMonthDateRange(selectedMonth) : undefined;
-  const summaryParams = dateRange ?? {};
+  const isCustom = selectedPreset === "custom";
+  const presetRange = selectedPreset !== "custom" ? getPresetRange(selectedPreset) : {};
+  const dateRange = isCustom
+    ? { startDate: customStart || undefined, endDate: customEnd || undefined }
+    : presetRange;
+  const selectedLabel = getPresetLabel(selectedPreset, customStart, customEnd);
 
+  // "This Month" gets compared to "Last Month"; all other presets show no comparison
+  const showComparison = selectedPreset === "this-month";
+  const prevRange = showComparison ? getPresetRange("last-month") : null;
+
+  const summaryParams = { startDate: dateRange.startDate, endDate: dateRange.endDate };
   const summary = useGetDashboardSummary(summaryParams, {
     query: { queryKey: getGetDashboardSummaryQueryKey(summaryParams) },
   });
 
-  const prevMonthKey = isMonthly ? getPrevMonthKey(selectedMonth) : null;
-  const prevMonthRange = prevMonthKey ? getMonthDateRange(prevMonthKey) : null;
-  const prevSummaryParams = prevMonthRange ?? {};
+  const prevSummaryParams = prevRange ?? {};
   const prevSummary = useGetDashboardSummary(prevSummaryParams, {
     query: {
       queryKey: getGetDashboardSummaryQueryKey(prevSummaryParams),
-      enabled: !!prevMonthRange,
+      enabled: !!prevRange,
     },
   });
-  const cashflow = useGetCashflow({ months: 12 }, {
-    query: { queryKey: getGetCashflowQueryKey({ months: 12 }) },
+
+  const cashflowParams = { startDate: dateRange.startDate, endDate: dateRange.endDate };
+  const cashflow = useGetCashflow(cashflowParams, {
+    query: { queryKey: getGetCashflowQueryKey(cashflowParams) },
   });
-  const catParams = dateRange ?? {};
+
+  const catParams = { startDate: dateRange.startDate, endDate: dateRange.endDate };
   const categories = useGetSpendingByCategory(catParams, {
     query: { queryKey: getGetSpendingByCategoryQueryKey(catParams) },
   });
@@ -520,16 +584,6 @@ export default function Dashboard() {
 
   const s = summary.data;
   const f = forecast.data;
-
-  const currentMonthIdx = MONTH_OPTIONS.findIndex((m) => m.value === selectedMonth);
-  const canGoBack = currentMonthIdx < MONTH_OPTIONS.length - 1;
-  const canGoForward = isMonthly && currentMonthIdx > 0;
-
-  function stepMonth(dir: 1 | -1) {
-    if (selectedMonth === ALL_TIME) { setSelectedMonth(MONTH_OPTIONS[0]!.value); return; }
-    const next = MONTH_OPTIONS[currentMonthIdx - dir];
-    if (next) setSelectedMonth(next.value); else setSelectedMonth(ALL_TIME);
-  }
 
   const cashflowData = (cashflow.data?.months ?? []).map((m) => ({
     month: m.month.substring(5),
@@ -546,15 +600,11 @@ export default function Dashboard() {
     color: CHART_COLORS[i % CHART_COLORS.length],
   }));
 
-  const selectedLabel = isMonthly
-    ? MONTH_OPTIONS.find((m) => m.value === selectedMonth)?.label ?? selectedMonth
-    : "Last 12 months";
-
   function openDrill(type: DrillType) {
     setDrill({
       type,
-      startDate: dateRange?.startDate,
-      endDate: dateRange?.endDate,
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
       label: selectedLabel,
     });
   }
@@ -562,40 +612,59 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-foreground">Command Centre</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{isMonthly ? selectedLabel : (s?.periodLabel ?? "Loading...")}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => stepMonth(-1)} disabled={!canGoBack} title="Previous month">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="h-8 w-44 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_TIME}>Last 12 months</SelectItem>
-              {MONTH_OPTIONS.map((m) => (
-                <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => stepMonth(1)} disabled={!canGoForward} title="Next month">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-
-          {!isMonthly && f && (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-foreground">Command Centre</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">{selectedLabel}</p>
+          </div>
+          {f && (
             <div className="text-right bg-card border border-card-border rounded-lg px-4 py-2 hidden lg:block">
               <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
               <p className="text-sm font-semibold text-foreground">{f.onTrackMessage}</p>
             </div>
           )}
         </div>
+
+        {/* Date range preset pills */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Calendar className="w-3.5 h-3.5 text-muted-foreground/60 flex-shrink-0" />
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPreset(p.id)}
+                className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors whitespace-nowrap ${
+                  selectedPreset === p.id
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 bg-transparent"
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {isCustom && (
+            <div className="flex items-center gap-2 pl-5">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="h-7 px-2 text-xs rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <span className="text-xs text-muted-foreground">to</span>
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="h-7 px-2 text-xs rounded-md border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          )}
+        </div>
       </div>
 
-      {!isMonthly && f && (
+      {f && (
         <div className="bg-card border border-card-border rounded-lg px-4 py-2 lg:hidden">
           <p className="text-xs text-muted-foreground uppercase tracking-widest">Forecast</p>
           <p className="text-sm font-semibold text-foreground">{f.onTrackMessage}</p>
@@ -617,7 +686,7 @@ export default function Dashboard() {
             positive={true}
             onClick={() => openDrill("income")}
             hint="Click to see income by category"
-            change={isMonthly && prevSummary.data ? pctChange(s?.totalIncome ?? 0, prevSummary.data.totalIncome) : undefined}
+            change={showComparison && prevSummary.data ? pctChange(s?.totalIncome ?? 0, prevSummary.data.totalIncome) : undefined}
           />
           <MetricCard
             label="Total Expenses"
@@ -625,7 +694,7 @@ export default function Dashboard() {
             positive={false}
             onClick={() => openDrill("expenses")}
             hint="Click to see expenses by category"
-            change={isMonthly && prevSummary.data ? pctChange(s?.totalExpenses ?? 0, prevSummary.data.totalExpenses) : undefined}
+            change={showComparison && prevSummary.data ? pctChange(s?.totalExpenses ?? 0, prevSummary.data.totalExpenses) : undefined}
             invertChange
           />
           <MetricCard
@@ -641,13 +710,13 @@ export default function Dashboard() {
                 {s?.investmentsFiltered ?? 0} investment txns →
               </a>
             }
-            change={isMonthly && prevSummary.data ? pctChange(s?.totalInvested ?? 0, prevSummary.data.totalInvested) : undefined}
+            change={showComparison && prevSummary.data ? pctChange(s?.totalInvested ?? 0, prevSummary.data.totalInvested) : undefined}
           />
           <MetricCard
             label="Net Cashflow"
             value={formatCurrency(s?.netCashflow ?? 0)}
             positive={(s?.netCashflow ?? 0) >= 0}
-            change={isMonthly && prevSummary.data ? pctChange(s?.netCashflow ?? 0, prevSummary.data.netCashflow) : undefined}
+            change={showComparison && prevSummary.data ? pctChange(s?.netCashflow ?? 0, prevSummary.data.netCashflow) : undefined}
           />
           <MetricCard
             label="Savings Rate"
@@ -662,7 +731,7 @@ export default function Dashboard() {
               </a>
             }
             positive={(s?.savingsRate ?? 0) >= 15}
-            change={isMonthly && prevSummary.data ? pctChange(s?.savingsRate ?? 0, prevSummary.data.savingsRate) : undefined}
+            change={showComparison && prevSummary.data ? pctChange(s?.savingsRate ?? 0, prevSummary.data.savingsRate) : undefined}
           />
         </div>
       )}
@@ -672,7 +741,7 @@ export default function Dashboard() {
         <div className="lg:col-span-2 bg-card border border-card-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cash Flow — Last 12 Months</h2>
+              <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cash Flow — {selectedLabel}</h2>
               <p className="text-[10px] text-muted-foreground/50 mt-0.5">Click income or expense bar to drill in</p>
             </div>
             {cashflow.data && (
@@ -696,9 +765,8 @@ export default function Dashboard() {
                   dataKey="month"
                   tick={(props) => {
                     const { x, y, payload } = props;
-                    const isSelected = isMonthly && cashflowData.find((d) => d.month === payload.value)?.fullMonth === selectedMonth;
                     return (
-                      <text x={x} y={y + 12} textAnchor="middle" fontSize={11} fill={isSelected ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))"} fontWeight={isSelected ? "bold" : "normal"}>
+                      <text x={x} y={y + 12} textAnchor="middle" fontSize={11} fill="hsl(var(--muted-foreground))">
                         {payload.value}
                       </text>
                     );
@@ -716,7 +784,6 @@ export default function Dashboard() {
                   dataKey="Income"
                   fill="#10b981"
                   radius={[2, 2, 0, 0]}
-                  opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35}
                   style={{ cursor: "pointer" }}
                   onClick={(d: any) => {
                     const { startDate, endDate } = getMonthDateRange(d.fullMonth);
@@ -727,15 +794,14 @@ export default function Dashboard() {
                   dataKey="Expenses"
                   fill="#ef4444"
                   radius={[2, 2, 0, 0]}
-                  opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35}
                   style={{ cursor: "pointer" }}
                   onClick={(d: any) => {
                     const { startDate, endDate } = getMonthDateRange(d.fullMonth);
                     setDrill({ type: "expenses", startDate, endDate, label: d.fullMonth });
                   }}
                 />
-                <Bar dataKey="Investments" fill="#8b5cf6" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
-                <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} opacity={(d: any) => !isMonthly || d.fullMonth === selectedMonth ? 1 : 0.35} />
+                <Bar dataKey="Investments" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -776,7 +842,7 @@ export default function Dashboard() {
         <div className="bg-card border border-card-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">
-              Spending by Category{isMonthly ? ` — ${selectedLabel}` : ""}
+              Spending by Category — {selectedLabel}
             </h2>
             <button
               onClick={() => openDrill("expenses")}

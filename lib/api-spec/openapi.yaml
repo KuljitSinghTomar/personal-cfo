@@ -173,6 +173,14 @@ paths:
           schema:
             type: integer
             default: 12
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
       responses:
         "200":
           description: Cashflow chart data

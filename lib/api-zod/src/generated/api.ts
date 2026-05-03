@@ -177,6 +177,8 @@ export const getCashflowQueryMonthsDefault = 12;
 
 export const GetCashflowQueryParams = zod.object({
   months: zod.coerce.number().default(getCashflowQueryMonthsDefault),
+  startDate: zod.coerce.string().optional(),
+  endDate: zod.coerce.string().optional(),
 });
 
 export const GetCashflowResponse = zod.object({
