@@ -35,7 +35,7 @@ app.use("/api", router);
 const staticDir = process.env["STATIC_FILES_DIR"];
 if (staticDir) {
   app.use(express.static(staticDir));
-  app.use((_req, res) => {
+  app.get("/{*path}", (_req, res) => {
     res.sendFile(path.resolve(staticDir, "index.html"));
   });
 }
