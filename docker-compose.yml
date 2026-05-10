@@ -1,0 +1,35 @@
+services:
+  personal-cfo:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      BASE_PATH: "/"
+      NODE_ENV: production
+      STATIC_FILES_DIR: /app/public
+      DATABASE_URL: ${DATABASE_URL}
+      AI_INTEGRATIONS_ANTHROPIC_BASE_URL: "https://api.anthropic.com"
+      AI_INTEGRATIONS_ANTHROPIC_API_KEY: ${AI_INTEGRATIONS_ANTHROPIC_API_KEY}
+    networks:
+      - postgres_net
+
+  # Runs drizzle-kit push on every deploy to apply any schema changes.
+  # Idempotent — safe to run repeatedly. Exits after completing.
+  migrator:
+    build:
+      context: .
+      target: builder
+    working_dir: /app
+    command: sh -c "pnpm --filter @workspace/db run push"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    networks:
+      - postgres_net
+    restart: "no"
+
+networks:
+  postgres_net:
+    external: true
+    name: ${POSTGRES_NETWORK_NAME}
