@@ -1,5 +1,5 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
-FROM node:24-alpine AS builder
+FROM node:24-slim AS builder
 
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -21,7 +21,7 @@ RUN BASE_PATH=/ PORT=3000 NODE_ENV=production \
     pnpm --filter @workspace/family-cfo run build
 
 # ── Stage 2: Production ─────────────────────────────────────────────────────
-FROM node:24-alpine AS production
+FROM node:24-slim AS production
 
 WORKDIR /app
 
