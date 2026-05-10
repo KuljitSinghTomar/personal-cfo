@@ -1,6 +1,7 @@
 services:
   personal-cfo:
     build: .
+    container_name: personal-cfo
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -18,6 +19,7 @@ services:
   # Runs drizzle-kit push on every deploy to apply any schema changes.
   # Idempotent — safe to run repeatedly. Exits after completing.
   migrator:
+    container_name: personal-cfo-migrator
     build:
       context: .
       target: builder
