@@ -50,6 +50,15 @@ function formatCurrency(n: number) {
   return n.toLocaleString("en-AU", { style: "currency", currency: "AUD" });
 }
 
+function parsePattern(pattern: string): { parts: string[]; mode: "all" | "any" } {
+  const hasOr = pattern.includes("|");
+  const hasAnd = pattern.includes("&");
+  if (hasAnd && !hasOr) {
+    return { parts: pattern.split("&").map((p) => p.trim()).filter(Boolean), mode: "all" };
+  }
+  return { parts: pattern.split("|").map((p) => p.trim()).filter(Boolean), mode: "any" };
+}
+
 // ── Edit / Preview Modal ───────────────────────────────────────────────────
 
 function RuleEditModal({
@@ -111,7 +120,7 @@ function RuleEditModal({
     setSaving(false);
   };
 
-  const patternParts = draft.matchPattern.split("|").map((p) => p.trim()).filter(Boolean);
+  const { parts: patternParts, mode: patternMode } = parsePattern(draft.matchPattern);
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -140,7 +149,7 @@ function RuleEditModal({
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
                 Pattern
-                <span className="ml-1 text-muted-foreground/60">(case-insensitive · use | to match any of multiple words)</span>
+                <span className="ml-1 text-muted-foreground/60">(case-insensitive · use | to match any · use & to match all)</span>
               </label>
               <Input
                 className="h-9 text-sm font-mono"
@@ -153,7 +162,9 @@ function RuleEditModal({
                   {patternParts.map((p) => (
                     <code key={p} className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{p}</code>
                   ))}
-                  <span className="text-xs text-muted-foreground self-center">— matches any</span>
+                  <span className="text-xs text-muted-foreground self-center">
+                    — {patternMode === "all" ? "matches all" : "matches any"}
+                  </span>
                 </div>
               )}
             </div>
@@ -288,7 +299,7 @@ function CreateRuleForm({
     }
   };
 
-  const patternParts = draft.matchPattern.split("|").map((p) => p.trim()).filter(Boolean);
+  const { parts: patternParts, mode: patternMode } = parsePattern(draft.matchPattern);
 
   return (
     <div className="bg-card border border-primary/30 rounded-lg p-4 space-y-3">
@@ -309,7 +320,7 @@ function CreateRuleForm({
           </Select>
         </div>
         <div>
-          <label className="text-xs text-muted-foreground mb-1 block">Pattern (case-insensitive · | for OR)</label>
+          <label className="text-xs text-muted-foreground mb-1 block">Pattern (case-insensitive · | for OR · &amp; for AND)</label>
           <Input
             className="h-8 text-sm font-mono"
             placeholder='e.g. "CHILLI" or "CHILLI|RED HOT"'
@@ -322,6 +333,9 @@ function CreateRuleForm({
               {patternParts.map((p) => (
                 <code key={p} className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{p}</code>
               ))}
+              <span className="text-[10px] text-muted-foreground self-center">
+                — {patternMode === "all" ? "matches all" : "matches any"}
+              </span>
             </div>
           )}
         </div>
@@ -568,11 +582,21 @@ export default function CategoryRules() {
                     {FIELD_LABELS[rule.matchField]}
                   </td>
                   <td className="py-3 px-4">
-                    <div className="flex flex-wrap gap-1">
-                      {rule.matchPattern.split("|").map((p) => p.trim()).filter(Boolean).map((p) => (
-                        <code key={p} className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{p}</code>
-                      ))}
-                    </div>
+                    {(() => {
+                      const { parts, mode } = parsePattern(rule.matchPattern);
+                      return (
+                        <div className="flex flex-wrap gap-1 items-center">
+                          {parts.map((p) => (
+                            <code key={p} className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{p}</code>
+                          ))}
+                          {parts.length > 1 && (
+                            <span className="text-[10px] text-muted-foreground">
+                              — {mode === "all" ? "all" : "any"}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="py-3 px-4">
                     <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded text-xs font-medium">

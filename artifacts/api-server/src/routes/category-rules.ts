@@ -6,7 +6,9 @@ import { randomUUID } from "crypto";
 
 function matchesPattern(text: string, matchPattern: string): boolean {
   const lower = text.toLowerCase();
-  return matchPattern.split("|").some((p) => lower.includes(p.trim().toLowerCase()));
+  return matchPattern
+    .split("|")
+    .some((orPart) => orPart.split("&").every((term) => lower.includes(term.trim().toLowerCase())));
 }
 
 const VALID_FIELDS = new Set(["merchant", "description", "category"]);

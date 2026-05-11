@@ -13,11 +13,13 @@ import {
 import { autoGenerateBudgetGoals } from "./budget";
 import { syncNetWorthFromTransactions } from "./net-worth";
 
-// ── Pattern matching helper (supports | separator for OR matching) ─────────
+// ── Pattern matching helper (| for OR, & for AND) ─────────────────────────
 
 function matchesPattern(text: string, matchPattern: string): boolean {
   const lower = text.toLowerCase();
-  return matchPattern.split("|").some((p) => lower.includes(p.trim().toLowerCase()));
+  return matchPattern
+    .split("|")
+    .some((orPart) => orPart.split("&").every((term) => lower.includes(term.trim().toLowerCase())));
 }
 
 // ── Investment detection engine ────────────────────────────────────────────
