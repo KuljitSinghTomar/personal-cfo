@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
-import { Zap, Plus, Trash2, Check, X, Pencil, Play, ToggleLeft, ToggleRight, ChevronDown } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Zap, Plus, Trash2, Check, X, Pencil, Play, ToggleLeft, ToggleRight, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL;
@@ -25,6 +26,18 @@ interface ApplyResult {
   message: string;
 }
 
+interface PreviewResult {
+  count: number;
+  samples: {
+    id: string;
+    description: string;
+    transactionDate: string;
+    amount: number;
+    creditDebit: "credit" | "debit";
+    category: string | null;
+  }[];
+}
+
 const FIELD_LABELS: Record<MatchField, string> = {
   merchant: "Merchant name",
   description: "Description",
@@ -33,17 +46,318 @@ const FIELD_LABELS: Record<MatchField, string> = {
 
 const EMPTY_DRAFT = { matchPattern: "", matchField: "merchant" as MatchField, category: "" };
 
+function formatCurrency(n: number) {
+  return n.toLocaleString("en-AU", { style: "currency", currency: "AUD" });
+}
+
+// ── Edit / Preview Modal ───────────────────────────────────────────────────
+
+function RuleEditModal({
+  rule,
+  onSave,
+  onClose,
+}: {
+  rule: CategoryRule;
+  onSave: (id: string, draft: typeof EMPTY_DRAFT) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    matchPattern: rule.matchPattern,
+    matchField: rule.matchField,
+    category: rule.category,
+  });
+  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchPreview = useCallback((pattern: string, field: MatchField) => {
+    if (!pattern.trim()) { setPreview(null); return; }
+    setPreviewLoading(true);
+    fetch(`${BASE}api/category-rules/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchPattern: pattern.trim(), matchField: field }),
+    })
+      .then((r) => r.json())
+      .then((d) => setPreview(d))
+      .catch(() => setPreview(null))
+      .finally(() => setPreviewLoading(false));
+  }, []);
+
+  // Fetch preview for current rule on open
+  useEffect(() => {
+    fetchPreview(draft.matchPattern, draft.matchField);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const schedulPreview = (pattern: string, field: MatchField) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchPreview(pattern, field), 300);
+  };
+
+  const update = (changes: Partial<typeof draft>) => {
+    const next = { ...draft, ...changes };
+    setDraft(next);
+    schedulPreview(next.matchPattern, next.matchField);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(rule.id, draft);
+    setSaving(false);
+  };
+
+  const patternParts = draft.matchPattern.split("|").map((p) => p.trim()).filter(Boolean);
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Edit rule</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Fields */}
+          <div className="grid grid-cols-1 gap-3">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Match field</label>
+              <Select
+                value={draft.matchField}
+                onValueChange={(v) => update({ matchField: v as MatchField })}
+              >
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="merchant">Merchant name</SelectItem>
+                  <SelectItem value="description">Description contains</SelectItem>
+                  <SelectItem value="category">Original category</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Pattern
+                <span className="ml-1 text-muted-foreground/60">(case-insensitive · use | to match any of multiple words)</span>
+              </label>
+              <Input
+                className="h-9 text-sm font-mono"
+                value={draft.matchPattern}
+                onChange={(e) => update({ matchPattern: e.target.value })}
+                autoFocus
+              />
+              {patternParts.length > 1 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {patternParts.map((p) => (
+                    <code key={p} className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{p}</code>
+                  ))}
+                  <span className="text-xs text-muted-foreground self-center">— matches any</span>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">Assign category</label>
+              <Input
+                className="h-9 text-sm"
+                value={draft.category}
+                onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          {/* Live preview */}
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              {previewLoading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-3 h-3 text-primary" />}
+              Live match preview
+            </div>
+
+            {!draft.matchPattern.trim() ? (
+              <p className="text-xs text-muted-foreground">Enter a pattern to see matching transactions.</p>
+            ) : previewLoading ? (
+              <p className="text-xs text-muted-foreground">Scanning transactions…</p>
+            ) : preview ? (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">
+                  {preview.count === 0
+                    ? "No transactions match this rule"
+                    : `${preview.count} transaction${preview.count !== 1 ? "s" : ""} match this rule`}
+                </p>
+                {preview.samples.length > 0 && (
+                  <div className="space-y-1">
+                    {preview.samples.map((s) => (
+                      <div key={s.id} className="flex items-center justify-between py-1 px-2 rounded bg-muted/60 text-xs">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-foreground truncate font-mono text-[11px]">{s.description}</p>
+                          <p className="text-muted-foreground">{s.transactionDate} · {s.category ?? "—"}</p>
+                        </div>
+                        <span className={`flex-shrink-0 font-semibold ml-3 ${s.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
+                          {s.creditDebit === "debit" ? "-" : "+"}{formatCurrency(s.amount)}
+                        </span>
+                      </div>
+                    ))}
+                    {preview.count > 5 && (
+                      <p className="text-xs text-muted-foreground text-center py-1">+ {preview.count - 5} more</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || !draft.matchPattern.trim() || !draft.category.trim()}
+            >
+              {saving ? "Saving…" : "Save rule"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Create form with live preview ─────────────────────────────────────────
+
+function CreateRuleForm({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: (rule: CategoryRule) => void;
+  onCancel: () => void;
+}) {
+  const { toast } = useToast();
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchPreview = useCallback((pattern: string, field: MatchField) => {
+    if (!pattern.trim()) { setPreview(null); return; }
+    setPreviewLoading(true);
+    fetch(`${BASE}api/category-rules/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchPattern: pattern.trim(), matchField: field }),
+    })
+      .then((r) => r.json())
+      .then((d) => setPreview(d))
+      .catch(() => setPreview(null))
+      .finally(() => setPreviewLoading(false));
+  }, []);
+
+  const update = (changes: Partial<typeof draft>) => {
+    const next = { ...draft, ...changes };
+    setDraft(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchPreview(next.matchPattern, next.matchField), 300);
+  };
+
+  const handleCreate = async () => {
+    if (!draft.matchPattern.trim() || !draft.category.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${BASE}api/category-rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const data = await res.json();
+      onCreated(data.rule);
+      toast({ title: "Rule created", description: `Transactions matching "${draft.matchPattern}" → "${draft.category}"` });
+    } catch {
+      toast({ title: "Failed to create rule", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const patternParts = draft.matchPattern.split("|").map((p) => p.trim()).filter(Boolean);
+
+  return (
+    <div className="bg-card border border-primary/30 rounded-lg p-4 space-y-3">
+      <p className="text-sm font-medium">New rule</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Match field</label>
+          <Select
+            value={draft.matchField}
+            onValueChange={(v) => update({ matchField: v as MatchField })}
+          >
+            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="merchant">Merchant name</SelectItem>
+              <SelectItem value="description">Description contains</SelectItem>
+              <SelectItem value="category">Original category</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Pattern (case-insensitive · | for OR)</label>
+          <Input
+            className="h-8 text-sm font-mono"
+            placeholder='e.g. "CHILLI" or "CHILLI|RED HOT"'
+            value={draft.matchPattern}
+            onChange={(e) => update({ matchPattern: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          />
+          {patternParts.length > 1 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {patternParts.map((p) => (
+                <code key={p} className="bg-muted px-1 py-0.5 rounded text-[10px] font-mono">{p}</code>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground mb-1 block">Assign category</label>
+          <Input
+            className="h-8 text-sm"
+            placeholder="e.g. Groceries"
+            value={draft.category}
+            onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))}
+            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          />
+        </div>
+      </div>
+
+      {/* Inline preview for create form */}
+      {draft.matchPattern.trim() && (
+        <div className="bg-muted/30 rounded px-3 py-2 text-xs flex items-center gap-2">
+          {previewLoading ? (
+            <><RefreshCw className="w-3 h-3 animate-spin text-muted-foreground" /><span className="text-muted-foreground">Scanning…</span></>
+          ) : preview ? (
+            <span className={preview.count > 0 ? "text-foreground" : "text-muted-foreground"}>
+              <span className="font-semibold">{preview.count}</span> existing transaction{preview.count !== 1 ? "s" : ""} would match this rule
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      <div className="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" onClick={handleCreate} disabled={saving || !draft.matchPattern.trim() || !draft.category.trim()}>
+          {saving ? "Saving…" : "Save rule"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
+
 export default function CategoryRules() {
   const { toast } = useToast();
   const [rules, setRules] = useState<CategoryRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState(EMPTY_DRAFT);
+  const [editingRule, setEditingRule] = useState<CategoryRule | null>(null);
   const [creating, setCreating] = useState(false);
-  const [createDraft, setCreateDraft] = useState(EMPTY_DRAFT);
-  const [savingId, setSavingId] = useState<string | null>(null);
 
   const loadRules = useCallback(() => {
     setLoading(true);
@@ -70,28 +384,19 @@ export default function CategoryRules() {
     }
   };
 
-  const startEdit = (rule: CategoryRule) => {
-    setEditingId(rule.id);
-    setEditDraft({ matchPattern: rule.matchPattern, matchField: rule.matchField, category: rule.category });
-  };
-
-  const saveEdit = async (id: string) => {
-    if (!editDraft.matchPattern.trim() || !editDraft.category.trim()) return;
-    setSavingId(id);
+  const saveEdit = async (id: string, draft: typeof EMPTY_DRAFT) => {
     try {
       const res = await fetch(`${BASE}api/category-rules/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editDraft),
+        body: JSON.stringify(draft),
       });
       const data = await res.json();
       setRules((prev) => prev.map((r) => r.id === id ? data.rule : r));
-      setEditingId(null);
+      setEditingRule(null);
       toast({ title: "Rule updated" });
     } catch {
       toast({ title: "Failed to save rule", variant: "destructive" });
-    } finally {
-      setSavingId(null);
     }
   };
 
@@ -102,27 +407,6 @@ export default function CategoryRules() {
       toast({ title: "Rule deleted" });
     } catch {
       toast({ title: "Failed to delete rule", variant: "destructive" });
-    }
-  };
-
-  const createRule = async () => {
-    if (!createDraft.matchPattern.trim() || !createDraft.category.trim()) return;
-    setSavingId("new");
-    try {
-      const res = await fetch(`${BASE}api/category-rules`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createDraft),
-      });
-      const data = await res.json();
-      setRules((prev) => [...prev, data.rule]);
-      setCreating(false);
-      setCreateDraft(EMPTY_DRAFT);
-      toast({ title: "Rule created", description: `Transactions matching "${createDraft.matchPattern}" will be categorised as "${createDraft.category}"` });
-    } catch {
-      toast({ title: "Failed to create rule", variant: "destructive" });
-    } finally {
-      setSavingId(null);
     }
   };
 
@@ -227,56 +511,19 @@ export default function CategoryRules() {
           <li>Rules are matched in order (oldest first). The first matching rule wins.</li>
           <li>Manual category edits are never overwritten unless you choose "Overwrite all".</li>
           <li>Rules are also created automatically when you use the bulk-recategorise flow on the Transactions page.</li>
+          <li>Patterns support <span className="text-foreground font-mono">|</span> to match any of multiple words, e.g. <span className="font-mono">CHILLI|RED HOT</span>.</li>
         </ul>
       </div>
 
       {/* Create form */}
       {creating && (
-        <div className="bg-card border border-primary/30 rounded-lg p-4 space-y-3">
-          <p className="text-sm font-medium">New rule</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Match field</label>
-              <Select
-                value={createDraft.matchField}
-                onValueChange={(v) => setCreateDraft((d) => ({ ...d, matchField: v as MatchField }))}
-              >
-                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="merchant">Merchant name</SelectItem>
-                  <SelectItem value="description">Description contains</SelectItem>
-                  <SelectItem value="category">Original category</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Pattern (case-insensitive)</label>
-              <Input
-                className="h-8 text-sm"
-                placeholder='e.g. "Woolworths" or "BPAY"'
-                value={createDraft.matchPattern}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, matchPattern: e.target.value }))}
-                onKeyDown={(e) => e.key === "Enter" && createRule()}
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Assign category</label>
-              <Input
-                className="h-8 text-sm"
-                placeholder="e.g. Groceries"
-                value={createDraft.category}
-                onChange={(e) => setCreateDraft((d) => ({ ...d, category: e.target.value }))}
-                onKeyDown={(e) => e.key === "Enter" && createRule()}
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <Button variant="ghost" size="sm" onClick={() => { setCreating(false); setCreateDraft(EMPTY_DRAFT); }}>Cancel</Button>
-            <Button size="sm" onClick={createRule} disabled={savingId === "new" || !createDraft.matchPattern.trim() || !createDraft.category.trim()}>
-              {savingId === "new" ? "Saving…" : "Save rule"}
-            </Button>
-          </div>
-        </div>
+        <CreateRuleForm
+          onCreated={(rule) => {
+            setRules((prev) => [...prev, rule]);
+            setCreating(false);
+          }}
+          onCancel={() => setCreating(false)}
+        />
       )}
 
       {/* Rules table */}
@@ -305,111 +552,67 @@ export default function CategoryRules() {
             <tbody>
               {rules.map((rule) => (
                 <tr key={rule.id} className={`border-b border-border last:border-0 transition-colors ${rule.isActive ? "hover:bg-muted/20" : "opacity-50 hover:bg-muted/20"}`}>
-                  {editingId === rule.id ? (
-                    <>
-                      <td className="py-2 px-3">
-                        <Select
-                          value={editDraft.matchField}
-                          onValueChange={(v) => setEditDraft((d) => ({ ...d, matchField: v as MatchField }))}
-                        >
-                          <SelectTrigger className="h-7 text-xs w-36"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="merchant">Merchant name</SelectItem>
-                            <SelectItem value="description">Description</SelectItem>
-                            <SelectItem value="category">Original category</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="py-2 px-3">
-                        <Input
-                          className="h-7 text-xs"
-                          value={editDraft.matchPattern}
-                          onChange={(e) => setEditDraft((d) => ({ ...d, matchPattern: e.target.value }))}
-                          onKeyDown={(e) => { if (e.key === "Enter") saveEdit(rule.id); if (e.key === "Escape") setEditingId(null); }}
-                          autoFocus
-                        />
-                      </td>
-                      <td className="py-2 px-3">
-                        <Input
-                          className="h-7 text-xs"
-                          value={editDraft.category}
-                          onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value }))}
-                          onKeyDown={(e) => { if (e.key === "Enter") saveEdit(rule.id); if (e.key === "Escape") setEditingId(null); }}
-                        />
-                      </td>
-                      <td className="py-2 px-3" />
-                      <td className="py-2 px-3">
-                        <div className="flex gap-1 justify-end">
-                          <button
-                            onClick={() => saveEdit(rule.id)}
-                            disabled={savingId === rule.id}
-                            className="p-1.5 rounded text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                            title="Save"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setEditingId(null)}
-                            className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                            title="Cancel"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-3 px-4 text-xs text-muted-foreground whitespace-nowrap">
-                        {FIELD_LABELS[rule.matchField]}
-                      </td>
-                      <td className="py-3 px-4">
-                        <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{rule.matchPattern}</code>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded text-xs font-medium">
-                          {rule.category}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <button
-                          onClick={() => toggleActive(rule)}
-                          className={`flex items-center gap-1.5 text-xs transition-colors ${rule.isActive ? "text-emerald-400" : "text-muted-foreground"}`}
-                          title={rule.isActive ? "Click to pause" : "Click to activate"}
-                        >
-                          {rule.isActive ? (
-                            <ToggleRight className="w-4 h-4" />
-                          ) : (
-                            <ToggleLeft className="w-4 h-4" />
-                          )}
-                          {rule.isActive ? "Active" : "Paused"}
-                        </button>
-                      </td>
-                      <td className="py-3 px-4">
-                        <div className="flex gap-1 justify-end">
-                          <button
-                            onClick={() => startEdit(rule)}
-                            className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                            title="Edit rule"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => deleteRule(rule.id)}
-                            className="p-1.5 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                            title="Delete rule"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  )}
+                  <td className="py-3 px-4 text-xs text-muted-foreground whitespace-nowrap">
+                    {FIELD_LABELS[rule.matchField]}
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex flex-wrap gap-1">
+                      {rule.matchPattern.split("|").map((p) => p.trim()).filter(Boolean).map((p) => (
+                        <code key={p} className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">{p}</code>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className="bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded text-xs font-medium">
+                      {rule.category}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <button
+                      onClick={() => toggleActive(rule)}
+                      className={`flex items-center gap-1.5 text-xs transition-colors ${rule.isActive ? "text-emerald-400" : "text-muted-foreground"}`}
+                      title={rule.isActive ? "Click to pause" : "Click to activate"}
+                    >
+                      {rule.isActive ? (
+                        <ToggleRight className="w-4 h-4" />
+                      ) : (
+                        <ToggleLeft className="w-4 h-4" />
+                      )}
+                      {rule.isActive ? "Active" : "Paused"}
+                    </button>
+                  </td>
+                  <td className="py-3 px-4">
+                    <div className="flex gap-1 justify-end">
+                      <button
+                        onClick={() => setEditingRule(rule)}
+                        className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                        title="Edit rule"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => deleteRule(rule.id)}
+                        className="p-1.5 rounded text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        title="Delete rule"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Edit modal */}
+      {editingRule && (
+        <RuleEditModal
+          rule={editingRule}
+          onSave={saveEdit}
+          onClose={() => setEditingRule(null)}
+        />
       )}
     </div>
   );

@@ -1,8 +1,13 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { categoryRulesTable, transactionsTable } from "@workspace/db";
-import { eq, isNull } from "drizzle-orm";
+import { eq, isNull, desc } from "drizzle-orm";
 import { randomUUID } from "crypto";
+
+function matchesPattern(text: string, matchPattern: string): boolean {
+  const lower = text.toLowerCase();
+  return matchPattern.split("|").some((p) => lower.includes(p.trim().toLowerCase()));
+}
 
 const VALID_FIELDS = new Set(["merchant", "description", "category"]);
 
@@ -112,14 +117,13 @@ router.post("/category-rules/apply", async (req, res) => {
 
     for (const tx of rows) {
       for (const rule of activeRules) {
-        const pattern = rule.matchPattern.toLowerCase();
         let matches = false;
         if (rule.matchField === "merchant" && tx.merchantName) {
-          matches = tx.merchantName.toLowerCase().includes(pattern);
+          matches = matchesPattern(tx.merchantName, rule.matchPattern);
         } else if (rule.matchField === "description") {
-          matches = tx.description.toLowerCase().includes(pattern);
+          matches = matchesPattern(tx.description, rule.matchPattern);
         } else if (rule.matchField === "category" && tx.categoryName) {
-          matches = tx.categoryName.toLowerCase().includes(pattern);
+          matches = matchesPattern(tx.categoryName, rule.matchPattern);
         }
         if (matches) {
           await db
@@ -141,6 +145,53 @@ router.post("/category-rules/apply", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to apply category rules");
     res.status(500).json({ error: "Failed to apply category rules" });
+  }
+});
+
+// ── Preview: count transactions matching a given pattern ───────────────────
+
+router.post("/category-rules/preview", async (req, res) => {
+  try {
+    const { matchPattern, matchField } = req.body as { matchPattern: string; matchField: string };
+    if (!matchPattern?.trim() || !VALID_FIELDS.has(matchField)) {
+      return res.status(400).json({ error: "matchPattern and matchField are required" });
+    }
+
+    const rows = await db
+      .select({
+        id: transactionsTable.id,
+        merchantName: transactionsTable.merchantName,
+        description: transactionsTable.description,
+        categoryName: transactionsTable.categoryName,
+        userCategory: transactionsTable.userCategory,
+        transactionDate: transactionsTable.transactionDate,
+        amount: transactionsTable.amount,
+        creditDebit: transactionsTable.creditDebit,
+      })
+      .from(transactionsTable)
+      .orderBy(desc(transactionsTable.transactionDate));
+
+    const matching = rows.filter((tx) => {
+      const field =
+        matchField === "merchant" ? tx.merchantName
+        : matchField === "description" ? tx.description
+        : tx.categoryName;
+      return field ? matchesPattern(field, matchPattern) : false;
+    });
+
+    const samples = matching.slice(0, 5).map((tx) => ({
+      id: tx.id,
+      description: tx.description,
+      transactionDate: tx.transactionDate,
+      amount: parseFloat(tx.amount),
+      creditDebit: tx.creditDebit,
+      category: tx.userCategory ?? tx.categoryName,
+    }));
+
+    res.json({ count: matching.length, samples });
+  } catch (err) {
+    req.log.error({ err }, "Failed to preview category rule");
+    res.status(500).json({ error: "Failed to preview" });
   }
 });
 

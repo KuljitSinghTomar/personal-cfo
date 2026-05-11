@@ -13,6 +13,13 @@ import {
 import { autoGenerateBudgetGoals } from "./budget";
 import { syncNetWorthFromTransactions } from "./net-worth";
 
+// ── Pattern matching helper (supports | separator for OR matching) ─────────
+
+function matchesPattern(text: string, matchPattern: string): boolean {
+  const lower = text.toLowerCase();
+  return matchPattern.split("|").some((p) => lower.includes(p.trim().toLowerCase()));
+}
+
 // ── Investment detection engine ────────────────────────────────────────────
 
 const INVESTMENT_CATEGORY_PATTERNS = [
@@ -378,13 +385,12 @@ router.post("/transactions/import", async (req, res) => {
 
     function applyRules(merchantName: string | null, description: string, categoryName: string | null): string | null {
       for (const rule of activeRules) {
-        const pattern = rule.matchPattern.toLowerCase();
         if (rule.matchField === "merchant" && merchantName) {
-          if (merchantName.toLowerCase().includes(pattern)) return rule.category;
+          if (matchesPattern(merchantName, rule.matchPattern)) return rule.category;
         } else if (rule.matchField === "description") {
-          if (description.toLowerCase().includes(pattern)) return rule.category;
+          if (matchesPattern(description, rule.matchPattern)) return rule.category;
         } else if (rule.matchField === "category" && categoryName) {
-          if (categoryName.toLowerCase().includes(pattern)) return rule.category;
+          if (matchesPattern(categoryName, rule.matchPattern)) return rule.category;
         }
       }
       return null;
@@ -598,19 +604,29 @@ router.post("/transactions/bulk-recategorize", async (req, res) => {
 
     let ruleId: string | null = null;
     if (createRule) {
-      // Pick the most specific criterion for the rule:
-      // merchant > descriptionToken > account
-      const priorityOrder: CriterionType[] = ["merchant", "descriptionToken", "account", "amount", "creditDebit"];
-      const primary = priorityOrder.map((t) => criteria.find((c) => c.type === t)).find(Boolean);
+      const merchantCriterion = criteria.find((c) => c.type === "merchant");
+      const descTokenCriteria = criteria.filter((c) => c.type === "descriptionToken");
 
-      if (primary) {
+      let matchField: "merchant" | "description" | undefined;
+      let matchPattern: string | undefined;
+
+      if (merchantCriterion) {
+        matchField = "merchant";
+        matchPattern = merchantCriterion.value;
+      } else if (descTokenCriteria.length > 0) {
+        matchField = "description";
+        // Join all selected tokens with | so the rule matches any of them
+        matchPattern = descTokenCriteria.map((c) => c.value).join("|");
+      } else {
+        const fallback = criteria.find((c) => c.type === "account");
+        if (fallback) { matchField = "description"; matchPattern = fallback.value; }
+      }
+
+      if (matchField && matchPattern) {
         ruleId = randomUUID();
-        const matchField = primary.type === "merchant" ? "merchant"
-          : primary.type === "account" ? "description"
-          : "description";
         await db.insert(categoryRulesTable).values({
           id: ruleId,
-          matchPattern: primary.value,
+          matchPattern,
           matchField,
           category: newCategory,
           isActive: true,
