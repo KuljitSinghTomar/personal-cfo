@@ -10,7 +10,7 @@ import { useSearch } from "wouter";
 import {
   Search, Upload, RefreshCw, Repeat2, Clock, X,
   ChevronLeft, ChevronRight, Shuffle, Tag, Check, ChevronsUpDown,
-  AlertTriangle, Layers, Fingerprint, ArrowRight, TrendingUp,
+  AlertTriangle, Layers, Fingerprint, ArrowRight, TrendingUp, Info,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,8 @@ import {
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
+import { TransactionDetailDialog } from "@/components/transaction-detail-dialog";
+import type { Transaction } from "@workspace/api-client-react";
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 2 }).format(amount);
@@ -466,6 +468,7 @@ export default function Transactions() {
   const [creditDebit, setCreditDebit] = useState<"all" | "credit" | "debit">("all");
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [bulkDialog, setBulkDialog] = useState<BulkDialogState | null>(null);
+  const [detailTx, setDetailTx] = useState<Transaction | null>(null);
 
   useEffect(() => {
     fetch(`${BASE}api/transactions/categories`)
@@ -820,6 +823,13 @@ export default function Transactions() {
                         <td className="py-2.5 px-3 text-right">
                           <div className="flex gap-1 justify-end">
                             <button
+                              onClick={() => setDetailTx(tx)}
+                              className="text-xs px-2 py-1 rounded border transition-colors border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                              title="View details"
+                            >
+                              <Info className="w-3 h-3" />
+                            </button>
+                            <button
                               onClick={() => markAsTransfer(tx.id, tx.isTransfer)}
                               className="text-xs px-2 py-1 rounded border transition-colors border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
                               title="Mark as transfer"
@@ -1077,6 +1087,11 @@ export default function Transactions() {
         onClose={() => setBulkDialog(null)}
         onApply={handleBulkApply}
       />
+
+      {/* Transaction detail dialog */}
+      {detailTx && (
+        <TransactionDetailDialog tx={detailTx} onClose={() => setDetailTx(null)} />
+      )}
     </div>
   );
 }
