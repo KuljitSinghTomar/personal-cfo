@@ -151,15 +151,17 @@ function BulkApplyDialog({
   const [results, setResults] = useState<SimilarResults | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [sampleLimit, setSampleLimit] = useState(5);
 
   // Initialise when dialog opens
   useEffect(() => {
     if (!state) return;
     setSelectedCriteria(state.defaultCriteria);
     setResults(state.results);
+    setSampleLimit(5);
   }, [state]);
 
-  // Re-query when criteria change (debounced)
+  // Re-query when criteria or sampleLimit change (debounced)
   useEffect(() => {
     if (!state || selectedCriteria.length === 0) {
       setResults({ count: 0, totalAmount: 0, earliestDate: null, latestDate: null, categories: [], samples: [] });
@@ -171,14 +173,14 @@ function BulkApplyDialog({
         const res = await fetch(`${BASE}api/transactions/preview-similar`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ txId: state.txId, criteria: selectedCriteria }),
+          body: JSON.stringify({ txId: state.txId, criteria: selectedCriteria, sampleLimit }),
         });
         if (res.ok) setResults(await res.json());
       } catch { /* ignore */ }
       finally { setPreviewLoading(false); }
     }, 300);
     return () => clearTimeout(timer);
-  }, [state, selectedCriteria]);
+  }, [state, selectedCriteria, sampleLimit]);
 
   if (!state) return null;
 
@@ -188,6 +190,7 @@ function BulkApplyDialog({
     selectedCriteria.some((c) => c.type === type && c.value.toLowerCase() === value.toLowerCase());
 
   const toggleCriterion = (type: CriterionType, value: string) => {
+    setSampleLimit(5);
     setSelectedCriteria((prev) => {
       const exists = prev.some((c) => c.type === type && c.value.toLowerCase() === value.toLowerCase());
       if (exists) return prev.filter((c) => !(c.type === type && c.value.toLowerCase() === value.toLowerCase()));
@@ -320,7 +323,7 @@ function BulkApplyDialog({
             )}
 
             {(results?.samples ?? []).length > 0 && (
-              <div className="space-y-1 max-h-36 overflow-y-auto">
+              <div className={`space-y-1 overflow-y-auto ${sampleLimit > 5 ? "max-h-64" : "max-h-36"}`}>
                 {results!.samples.map((s) => (
                   <div key={s.id} className="flex items-center justify-between py-1 px-2 rounded bg-muted/50 text-xs">
                     <div className="min-w-0 flex-1">
@@ -332,8 +335,14 @@ function BulkApplyDialog({
                     </span>
                   </div>
                 ))}
-                {displayCount > 5 && (
-                  <p className="text-xs text-muted-foreground text-center py-1">+ {displayCount - 5} more transactions</p>
+                {sampleLimit < displayCount && (
+                  <button
+                    className="w-full text-xs text-muted-foreground hover:text-foreground text-center py-1 transition-colors cursor-pointer"
+                    onClick={() => setSampleLimit(displayCount)}
+                    disabled={previewLoading}
+                  >
+                    {previewLoading ? "Loading…" : `+ ${displayCount - sampleLimit} more transactions`}
+                  </button>
                 )}
               </div>
             )}

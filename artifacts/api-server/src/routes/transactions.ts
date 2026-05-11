@@ -220,7 +220,7 @@ function buildCriteriaConditions(criteria: MatchCriterion[], excludeId: string) 
   return and(...conditions);
 }
 
-async function runSimilarQuery(criteria: MatchCriterion[], excludeId: string) {
+async function runSimilarQuery(criteria: MatchCriterion[], excludeId: string, sampleLimit = 5) {
   const where = buildCriteriaConditions(criteria, excludeId);
 
   const rows = await db
@@ -232,7 +232,7 @@ async function runSimilarQuery(criteria: MatchCriterion[], excludeId: string) {
   const totalAmount = rows.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
   const dates = rows.map((t) => t.transactionDate!).sort();
   const categories = [...new Set(rows.map((t) => t.userCategory ?? t.categoryName).filter(Boolean))];
-  const samples = rows.slice(0, 5).map((t) => ({
+  const samples = rows.slice(0, sampleLimit).map((t: typeof rows[number]) => ({
     id: t.id,
     description: t.userDescription ?? t.description,
     amount: parseFloat(t.amount),
@@ -566,12 +566,12 @@ router.get("/transactions/:id/similar", async (req, res) => {
 
 router.post("/transactions/preview-similar", async (req, res) => {
   try {
-    const { txId, criteria } = req.body as { txId: string; criteria: MatchCriterion[] };
+    const { txId, criteria, sampleLimit = 5 } = req.body as { txId: string; criteria: MatchCriterion[]; sampleLimit?: number };
     if (!txId || !Array.isArray(criteria)) {
       return res.status(400).json({ error: "txId and criteria are required" });
     }
     const results = criteria.length > 0
-      ? await runSimilarQuery(criteria, txId)
+      ? await runSimilarQuery(criteria, txId, Math.min(Math.max(1, sampleLimit), 500))
       : { count: 0, totalAmount: 0, earliestDate: null, latestDate: null, categories: [], samples: [] };
     res.json(results);
   } catch (err) {

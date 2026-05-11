@@ -68,21 +68,24 @@ function RuleEditModal({
   });
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [expandedSamples, setExpandedSamples] = useState<PreviewResult["samples"] | null>(null);
+  const [expandedLoading, setExpandedLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchPreview = useCallback((pattern: string, field: MatchField) => {
+  const fetchPreview = useCallback((pattern: string, field: MatchField, sampleLimit?: number) => {
     if (!pattern.trim()) { setPreview(null); return; }
-    setPreviewLoading(true);
+    const isExpand = sampleLimit !== undefined && sampleLimit > 5;
+    if (isExpand) setExpandedLoading(true); else setPreviewLoading(true);
     fetch(`${BASE}api/category-rules/preview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ matchPattern: pattern.trim(), matchField: field }),
+      body: JSON.stringify({ matchPattern: pattern.trim(), matchField: field, ...(sampleLimit ? { sampleLimit } : {}) }),
     })
       .then((r) => r.json())
-      .then((d) => setPreview(d))
-      .catch(() => setPreview(null))
-      .finally(() => setPreviewLoading(false));
+      .then((d) => { if (isExpand) setExpandedSamples(d.samples); else setPreview(d); })
+      .catch(() => { if (!isExpand) setPreview(null); })
+      .finally(() => { if (isExpand) setExpandedLoading(false); else setPreviewLoading(false); });
   }, []);
 
   // Fetch preview for current rule on open
@@ -98,6 +101,7 @@ function RuleEditModal({
   const update = (changes: Partial<typeof draft>) => {
     const next = { ...draft, ...changes };
     setDraft(next);
+    setExpandedSamples(null);
     schedulPreview(next.matchPattern, next.matchField);
   };
 
@@ -183,19 +187,27 @@ function RuleEditModal({
                 </p>
                 {preview.samples.length > 0 && (
                   <div className="space-y-1">
-                    {preview.samples.map((s) => (
-                      <div key={s.id} className="flex items-center justify-between py-1 px-2 rounded bg-muted/60 text-xs">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-foreground truncate font-mono text-[11px]">{s.description}</p>
-                          <p className="text-muted-foreground">{s.transactionDate} · {s.category ?? "—"}</p>
+                    <div className={expandedSamples ? "max-h-64 overflow-y-auto space-y-1" : "space-y-1"}>
+                      {(expandedSamples ?? preview.samples).map((s) => (
+                        <div key={s.id} className="flex items-center justify-between py-1 px-2 rounded bg-muted/60 text-xs">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-foreground truncate font-mono text-[11px]">{s.description}</p>
+                            <p className="text-muted-foreground">{s.transactionDate} · {s.category ?? "—"}</p>
+                          </div>
+                          <span className={`flex-shrink-0 font-semibold ml-3 ${s.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
+                            {s.creditDebit === "debit" ? "-" : "+"}{formatCurrency(s.amount)}
+                          </span>
                         </div>
-                        <span className={`flex-shrink-0 font-semibold ml-3 ${s.creditDebit === "credit" ? "text-emerald-400" : "text-foreground"}`}>
-                          {s.creditDebit === "debit" ? "-" : "+"}{formatCurrency(s.amount)}
-                        </span>
-                      </div>
-                    ))}
-                    {preview.count > 5 && (
-                      <p className="text-xs text-muted-foreground text-center py-1">+ {preview.count - 5} more</p>
+                      ))}
+                    </div>
+                    {!expandedSamples && preview.count > 5 && (
+                      <button
+                        className="w-full text-xs text-muted-foreground hover:text-foreground text-center py-1 transition-colors cursor-pointer"
+                        onClick={() => fetchPreview(draft.matchPattern, draft.matchField, preview.count)}
+                        disabled={expandedLoading}
+                      >
+                        {expandedLoading ? "Loading…" : `+ ${preview.count - 5} more`}
+                      </button>
                     )}
                   </div>
                 )}

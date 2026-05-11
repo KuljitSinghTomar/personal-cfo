@@ -152,10 +152,11 @@ router.post("/category-rules/apply", async (req, res) => {
 
 router.post("/category-rules/preview", async (req, res) => {
   try {
-    const { matchPattern, matchField } = req.body as { matchPattern: string; matchField: string };
+    const { matchPattern, matchField, sampleLimit = 5 } = req.body as { matchPattern: string; matchField: string; sampleLimit?: number };
     if (!matchPattern?.trim() || !VALID_FIELDS.has(matchField)) {
       return res.status(400).json({ error: "matchPattern and matchField are required" });
     }
+    const safeSampleLimit = Math.min(Math.max(1, sampleLimit), 500);
 
     const rows = await db
       .select({
@@ -179,7 +180,7 @@ router.post("/category-rules/preview", async (req, res) => {
       return field ? matchesPattern(field, matchPattern) : false;
     });
 
-    const samples = matching.slice(0, 5).map((tx) => ({
+    const samples = matching.slice(0, safeSampleLimit).map((tx: typeof rows[number]) => ({
       id: tx.id,
       description: tx.description,
       transactionDate: tx.transactionDate,
