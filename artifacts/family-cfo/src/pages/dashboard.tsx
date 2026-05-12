@@ -782,6 +782,7 @@ export default function Dashboard() {
     Expenses: m.expenses,
     Investments: m.investments,
     Savings: m.savings,
+    "Offset Savings": m.offsetSavings ?? 0,
     IncomeTrend: incomeTrend[i],
     ExpensesTrend: expenseTrend[i],
   }));
@@ -1044,6 +1045,7 @@ export default function Dashboard() {
                 />
                 <Bar dataKey="Investments" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
                 <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Offset Savings" fill="#06b6d4" radius={[2, 2, 0, 0]} />
                 {rawMonths.length >= 3 && (
                   <>
                     <Line dataKey="IncomeTrend" stroke="#10b981" strokeWidth={2} dot={false} strokeDasharray="5 3" type="linear" legendType="none" />

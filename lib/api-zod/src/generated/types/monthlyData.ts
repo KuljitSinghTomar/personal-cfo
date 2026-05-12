@@ -13,4 +13,6 @@ export interface MonthlyData {
   investments: number;
   savings: number;
   transfers: number;
+  /** Explicit contributions to savings-type offset accounts (e.g. mortgage acceleration offset). Already included in the savings residual — shown separately for visibility. */
+  offsetSavings: number;
 }

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { transactionsTable } from "@workspace/db";
+import { transactionsTable, netWorthAccountsTable } from "@workspace/db";
 import { eq, and, gte, lte, sql, ne } from "drizzle-orm";
 import { GetDashboardSummaryQueryParams, GetCashflowQueryParams, GetSpendingByCategoryQueryParams } from "@workspace/api-zod";
 
@@ -112,6 +112,23 @@ router.get("/dashboard/cashflow", async (req, res) => {
     const startDate = query.startDate;
     const endDate = query.endDate;
 
+    // Identify savings-type offset accounts (asset, category=savings) by their linked account number.
+    // Credits to these accounts while flagged as transfers represent explicit mortgage-offset savings
+    // contributions — they should be surfaced separately rather than silently absorbed into the residual.
+    const savingsAccounts = await db
+      .select({ linkedAccountNumber: netWorthAccountsTable.linkedAccountNumber })
+      .from(netWorthAccountsTable)
+      .where(
+        and(
+          eq(netWorthAccountsTable.type, "asset"),
+          eq(netWorthAccountsTable.category, "savings"),
+          eq(netWorthAccountsTable.isLinked, true),
+        )
+      );
+    const savingsAccountNumbers = new Set(
+      savingsAccounts.map((a) => a.linkedAccountNumber).filter(Boolean) as string[]
+    );
+
     const conditions = [eq(transactionsTable.included, true)];
     if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
     if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
@@ -122,20 +139,27 @@ router.get("/dashboard/cashflow", async (req, res) => {
       isTransfer: transactionsTable.isTransfer,
       isInvestment: transactionsTable.isInvestment,
       transactionDate: transactionsTable.transactionDate,
+      accountNumber: transactionsTable.accountNumber,
     }).from(transactionsTable)
       .where(and(...conditions));
 
-    const monthlyMap: Record<string, { income: number; expenses: number; investments: number; transfers: number }> = {};
+    const monthlyMap: Record<string, { income: number; expenses: number; investments: number; transfers: number; offsetSavings: number }> = {};
 
     for (const row of rows) {
       if (!row.transactionDate) continue;
       const monthKey = row.transactionDate.substring(0, 7);
       if (!monthlyMap[monthKey]) {
-        monthlyMap[monthKey] = { income: 0, expenses: 0, investments: 0, transfers: 0 };
+        monthlyMap[monthKey] = { income: 0, expenses: 0, investments: 0, transfers: 0, offsetSavings: 0 };
       }
       const amount = parseFloat(row.amount);
       if (row.isTransfer) {
-        monthlyMap[monthKey].transfers += amount;
+        // Credits landing in a savings-type offset account are explicit mortgage-acceleration
+        // contributions. Track them separately so they appear as a named savings line item.
+        if (row.creditDebit === "credit" && savingsAccountNumbers.has(row.accountNumber ?? "")) {
+          monthlyMap[monthKey].offsetSavings += amount;
+        } else {
+          monthlyMap[monthKey].transfers += amount;
+        }
         continue;
       }
       if (row.isInvestment && row.creditDebit === "debit") {
@@ -161,8 +185,11 @@ router.get("/dashboard/cashflow", async (req, res) => {
         income: data.income,
         expenses: data.expenses,
         investments: data.investments,
+        // savings = total residual after expenses and investments (includes offsetSavings).
+        // Subtract offsetSavings on the frontend if you want "free cash" vs "offset savings" split.
         savings: data.income - data.expenses - data.investments,
         transfers: data.transfers,
+        offsetSavings: data.offsetSavings,
       };
     });
 

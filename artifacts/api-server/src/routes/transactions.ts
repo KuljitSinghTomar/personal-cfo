@@ -104,6 +104,9 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
   // payroll deposits (type=transfer_incoming, category=Salary/Regular Income)
   // must never be matched as transfers — they are real external income.
   // Loan accounts are excluded here (handled above in Step 1).
+  // userCategory takes precedence: if the user has overridden the category to
+  // something that is NOT a transfer (e.g. "Mortgage"), exclude from candidates
+  // even if the raw categoryName still says "Transfer Between Accounts".
   const candidates = await db
     .select({
       id: transactionsTable.id,
@@ -118,6 +121,12 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
         or(
           ilike(transactionsTable.categoryName, "%transfer%"),
           ilike(transactionsTable.categoryName, "%credit card payment%"),
+        ),
+        // Exclude if userCategory overrides to a non-transfer category
+        or(
+          sql`${transactionsTable.userCategory} IS NULL`,
+          ilike(transactionsTable.userCategory, "%transfer%"),
+          ilike(transactionsTable.userCategory, "%credit card payment%"),
         ),
         sql`lower(${transactionsTable.accountName}) not like '%loan%'`,
         sql`lower(${transactionsTable.accountName}) not like '%mortgage%'`,
@@ -456,8 +465,18 @@ router.post("/transactions/import", async (req, res) => {
 
         const existingRow = existingRows[0];
         if (existingRow) {
+          // Apply rules to fix up categoryName when the bank re-assigns a different raw category
+          // on re-import (e.g. LN REPAY alternating between "Mortgage" and "Transfer Between Accounts").
+          // Preserve any existing userCategory override; if none, apply rules as userCategory.
+          const ruleCategory = applyRules(merchantName, description, categoryName);
+          const effectiveCategoryName = ruleCategory ?? categoryName;
           await db.update(transactionsTable)
-            .set({ ...txData, userCategory: existingRow.userCategory, updatedAt: new Date() })
+            .set({
+              ...txData,
+              categoryName: effectiveCategoryName,
+              userCategory: existingRow.userCategory ?? ruleCategory,
+              updatedAt: new Date(),
+            })
             .where(eq(transactionsTable.transactionId, transactionId));
           updated++;
         } else {

@@ -801,6 +801,9 @@ components:
           type: number
         transfers:
           type: number
+        offsetSavings:
+          type: number
+          description: Explicit contributions to savings-type offset accounts (e.g. mortgage acceleration offset). Already included in the savings residual — shown separately for visibility.
       required:
         - month
         - income
@@ -808,6 +811,7 @@ components:
         - investments
         - savings
         - transfers
+        - offsetSavings
 
     SpendingByCategoryResponse:
       type: object
