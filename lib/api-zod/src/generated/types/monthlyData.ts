@@ -13,6 +13,10 @@ export interface MonthlyData {
   investments: number;
   savings: number;
   transfers: number;
-  /** Explicit contributions to savings-type offset accounts (e.g. mortgage acceleration offset). Already included in the savings residual — shown separately for visibility. */
-  offsetSavings: number;
+  /** Net flow into savings-type offset accounts (credits minus withdrawals). Part of the savings total. */
+  mortgageGoalOffset: number;
+  /** Residual after expenses, investments, and mortgage goal offset. Can be negative if offset commitments exceed available income. */
+  freeCash: number;
+  /** Investment amounts by sub-category (e.g. Securities Trades, Super Contribution). */
+  investmentBreakdown: Record<string, number>;
 }

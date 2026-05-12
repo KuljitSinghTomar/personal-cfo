@@ -176,7 +176,7 @@ function InsightIcon({ type }: { type: string }) {
 
 // ── Drilldown types ────────────────────────────────────────────────────────
 
-type DrillType = "income" | "expenses";
+type DrillType = "income" | "expenses" | "investments" | "offset" | "free-cash";
 
 interface DrillState {
   type: DrillType;
@@ -184,6 +184,7 @@ interface DrillState {
   endDate?: string;
   label: string;
   initialCategory?: string;
+  freeCashBreakdown?: { income: number; expenses: number; investments: number; mortgageGoalOffset: number; freeCash: number };
 }
 
 interface CategoryRow {
@@ -277,12 +278,16 @@ function DrillDownSheet({
   const [catSearch, setCatSearch] = useState("");
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [bulkDialog, setBulkDialog] = useState<BulkDialogState | null>(null);
+  const [offsetTxs, setOffsetTxs] = useState<any[]>([]);
+  const [offsetNetFlow, setOffsetNetFlow] = useState(0);
 
   // Transactions level state
   const [txPage, setTxPage] = useState(1);
   const TX_LIMIT = 15;
 
-  const txParams = selectedCategory && drill
+  const isCategoryDrillType = drill?.type === "income" || drill?.type === "expenses" || drill?.type === "investments";
+
+  const txParams = selectedCategory && drill && isCategoryDrillType
     ? {
         page: txPage,
         limit: TX_LIMIT,
@@ -291,6 +296,7 @@ function DrillDownSheet({
         startDate: drill.startDate,
         endDate: drill.endDate,
         isTransfer: false as const,
+        ...(drill.type === "investments" ? { isInvestment: true as const } : {}),
       }
     : null;
 
@@ -312,9 +318,9 @@ function DrillDownSheet({
       .catch(() => {});
   }, []);
 
-  // Fetch categories when drill state changes
+  // Fetch categories when drill state changes (income/expenses/investments only)
   useEffect(() => {
-    if (!drill) { setCategories([]); setSelectedCategory(null); setCatSearch(""); return; }
+    if (!drill || !isCategoryDrillType) { setCategories([]); setSelectedCategory(null); setCatSearch(""); setCatLoading(false); return; }
     setCatLoading(true);
     setSelectedCategory(drill.initialCategory ?? null);
     setTxPage(1);
@@ -327,6 +333,18 @@ function DrillDownSheet({
       .then((d) => { setCategories(d.categories ?? []); setTotal(d.total ?? 0); })
       .catch(() => {})
       .finally(() => setCatLoading(false));
+  }, [drill]);
+
+  // Fetch offset transactions when type=offset
+  useEffect(() => {
+    if (!drill || drill.type !== "offset") { setOffsetTxs([]); setOffsetNetFlow(0); return; }
+    const params = new URLSearchParams();
+    if (drill.startDate) params.set("startDate", drill.startDate);
+    if (drill.endDate) params.set("endDate", drill.endDate);
+    fetch(`${BASE}api/dashboard/offset-drilldown?${params}`)
+      .then((r) => r.json())
+      .then((d) => { setOffsetTxs(d.transactions ?? []); setOffsetNetFlow(d.netFlow ?? 0); })
+      .catch(() => {});
   }, [drill]);
 
   // Reset tx page when category changes
@@ -382,8 +400,13 @@ function DrillDownSheet({
   if (!drill) return null;
 
   const isIncome = drill.type === "income";
-  const accentColor = isIncome ? "text-emerald-400" : "text-red-400";
-  const barColor = isIncome ? "#10b981" : "#ef4444";
+  const isInvestments = drill.type === "investments";
+  const isOffset = drill.type === "offset";
+  const isFreeCash = drill.type === "free-cash";
+  const accentColor = isIncome ? "text-emerald-400" : isInvestments ? "text-violet-400" : isOffset ? "text-cyan-400" : isFreeCash ? "text-blue-400" : "text-red-400";
+  const barColor = isIncome ? "#10b981" : isInvestments ? "#8b5cf6" : "#ef4444";
+
+  const drillLabel = isIncome ? "Income" : isInvestments ? "Investments" : isOffset ? "Mortgage Goal Offset" : isFreeCash ? "Free Cash" : "Expenses";
 
   const filteredCats = catSearch
     ? categories.filter((c) => c.category.toLowerCase().includes(catSearch.toLowerCase()))
@@ -399,6 +422,7 @@ function DrillDownSheet({
   const viewAllParams = new URLSearchParams();
   if (selectedCategory) viewAllParams.set("category", selectedCategory);
   viewAllParams.set("creditDebit", isIncome ? "credit" : "debit");
+  if (isInvestments) viewAllParams.set("isInvestment", "true");
   if (drill.startDate) viewAllParams.set("startDate", drill.startDate);
   if (drill.endDate) viewAllParams.set("endDate", drill.endDate);
 
@@ -414,7 +438,7 @@ function DrillDownSheet({
                 onClick={() => setSelectedCategory(null)}
                 className={`hover:text-foreground transition-colors ${!selectedCategory ? "text-foreground font-medium" : ""}`}
               >
-                {isIncome ? "Income" : "Expenses"}
+                {drillLabel}
               </button>
               {selectedCategory && (
                 <>
@@ -436,39 +460,104 @@ function DrillDownSheet({
                 {selectedCategory}
               </span>
             ) : (
-              `${isIncome ? "Income" : "Expenses"} — ${drill.label}`
+              `${drillLabel} — ${drill.label}`
             )}
           </SheetTitle>
 
           {/* Summary line */}
           <p className="text-xs text-muted-foreground">
-            {selectedCategory && selectedCatData
+            {isCategoryDrillType && (selectedCategory && selectedCatData
               ? <>
                   <span className={`font-semibold ${accentColor}`}>{formatCurrency(selectedCatData.amount)}</span>
                   {" · "}{selectedCatData.count} transactions{" · "}
-                  {selectedCatData.percentage.toFixed(1)}% of {isIncome ? "income" : "expenses"}
+                  {selectedCatData.percentage.toFixed(1)}% of {drillLabel.toLowerCase()}
                 </>
               : <>
                   <span className={`font-semibold ${accentColor}`}>{formatCurrency(total)}</span>
                   {" · "}{categories.reduce((s, c) => s + c.count, 0)} transactions{" · "}
                   {categories.length} categories
                 </>
-            }
+            )}
+            {isOffset && (
+              <>Net flow: <span className={`font-semibold ${offsetNetFlow >= 0 ? "text-cyan-400" : "text-red-400"}`}>{formatCurrency(offsetNetFlow)}</span></>
+            )}
+            {isFreeCash && drill.freeCashBreakdown && (
+              <span className={`font-semibold ${accentColor}`}>{formatCurrency(drill.freeCashBreakdown.freeCash)}</span>
+            )}
           </p>
         </SheetHeader>
 
         {/* ── Body ─────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto">
 
+          {/* ── Offset: transaction list ─────────────────────── */}
+          {isOffset && (
+            <div className="px-5 py-4 space-y-1">
+              {offsetTxs.length === 0
+                ? <p className="text-sm text-muted-foreground text-center py-8">No transactions found</p>
+                : offsetTxs.map((tx: any) => {
+                    const amount = parseFloat(tx.amount);
+                    const isCredit = tx.creditDebit === "credit";
+                    return (
+                      <div key={tx.id} className="flex items-center gap-3 py-2.5 px-2 -mx-2 rounded-lg hover:bg-muted/40 transition-colors border-b border-border last:border-0">
+                        <div className="flex-shrink-0 w-16 text-right">
+                          <span className="text-xs text-muted-foreground">{tx.transactionDate}</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">{tx.description}</p>
+                        </div>
+                        <div className="flex-shrink-0 w-24 text-right">
+                          <span className={`text-sm font-semibold tabular-nums ${isCredit ? "text-cyan-400" : "text-red-400"}`}>
+                            {isCredit ? "+" : "-"}{formatCurrencyFull(amount)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+          )}
+
+          {/* ── Free Cash: derivation breakdown ──────────────── */}
+          {isFreeCash && drill.freeCashBreakdown && (
+            <div className="px-5 py-6 space-y-4">
+              <p className="text-xs text-muted-foreground">How free cash is calculated for {drill.label}:</p>
+              <div className="space-y-2 text-sm">
+                {[
+                  { label: "Income", value: drill.freeCashBreakdown.income, color: "text-emerald-400", sign: "+" },
+                  { label: "Expenses", value: drill.freeCashBreakdown.expenses, color: "text-red-400", sign: "−" },
+                  { label: "Investments", value: drill.freeCashBreakdown.investments, color: "text-violet-400", sign: "−" },
+                  { label: "Mortgage Goal Offset", value: drill.freeCashBreakdown.mortgageGoalOffset, color: "text-cyan-400", sign: "−" },
+                ].map(({ label, value, color, sign }) => (
+                  <div key={label} className="flex items-center justify-between py-1.5 border-b border-border">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className={`font-semibold tabular-nums ${color}`}>{sign} {formatCurrency(value)}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-2">
+                  <span className="font-semibold text-foreground">Free Cash</span>
+                  <span className={`font-semibold tabular-nums ${drill.freeCashBreakdown.freeCash >= 0 ? "text-blue-400" : "text-red-400"}`}>
+                    = {formatCurrency(drill.freeCashBreakdown.freeCash)}
+                  </span>
+                </div>
+                {drill.freeCashBreakdown.freeCash < 0 && (
+                  <p className="text-xs text-muted-foreground pt-1">
+                    Negative free cash means your mortgage goal and spending commitments exceeded income this month — you drew down the offset buffer.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ── Level 1: Categories ─────────────────────────── */}
-          {!selectedCategory && (
+          {isCategoryDrillType && !selectedCategory && (
             <div className="px-5 py-4 space-y-3">
               {/* Search */}
               <input
                 type="text"
                 value={catSearch}
                 onChange={(e) => setCatSearch(e.target.value)}
-                placeholder={`Search ${isIncome ? "income sources" : "expense categories"}…`}
+                placeholder={`Search ${isIncome ? "income sources" : isInvestments ? "investment categories" : "expense categories"}…`}
                 className="w-full h-8 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               />
 
@@ -529,19 +618,19 @@ function DrillDownSheet({
               {/* View all link */}
               <div className="pt-2 border-t border-border">
                 <Link
-                  href={`/transactions?creditDebit=${isIncome ? "credit" : "debit"}${drill.startDate ? `&startDate=${drill.startDate}` : ""}${drill.endDate ? `&endDate=${drill.endDate}` : ""}`}
+                  href={`/transactions?creditDebit=${isIncome ? "credit" : "debit"}${isInvestments ? "&isInvestment=true" : ""}${drill.startDate ? `&startDate=${drill.startDate}` : ""}${drill.endDate ? `&endDate=${drill.endDate}` : ""}`}
                   className="flex items-center gap-1.5 text-xs text-primary hover:underline"
                   onClick={onClose}
                 >
                   <ExternalLink className="w-3 h-3" />
-                  View all {isIncome ? "income" : "expense"} transactions
+                  View all {drillLabel.toLowerCase()} transactions
                 </Link>
               </div>
             </div>
           )}
 
           {/* ── Level 2: Transactions ─────────────────────────── */}
-          {selectedCategory && (
+          {isCategoryDrillType && selectedCategory && (
             <div className="px-5 py-4 space-y-2">
               {txQuery.isLoading ? (
                 <div className="space-y-2">
@@ -586,7 +675,7 @@ function DrillDownSheet({
                         </div>
                         {/* Amount */}
                         <div className="flex-shrink-0 w-20 text-right">
-                          <span className={`text-sm font-semibold tabular-nums ${isIncome ? "text-emerald-400" : "text-foreground"}`}>
+                          <span className={`text-sm font-semibold tabular-nums ${isIncome ? "text-emerald-400" : isInvestments ? "text-violet-400" : "text-foreground"}`}>
                             {isIncome ? "+" : "-"}{formatCurrencyFull(tx.amount)}
                           </span>
                         </div>
@@ -624,7 +713,7 @@ function DrillDownSheet({
                   {/* View all link */}
                   <div className="pt-2 border-t border-border">
                     <Link
-                      href={`/transactions?category=${encodeURIComponent(selectedCategory)}&creditDebit=${isIncome ? "credit" : "debit"}`}
+                      href={`/transactions?category=${encodeURIComponent(selectedCategory)}&creditDebit=${isIncome ? "credit" : "debit"}${isInvestments ? "&isInvestment=true" : ""}`}
                       className="flex items-center gap-1.5 text-xs text-primary hover:underline"
                       onClick={onClose}
                     >
@@ -775,17 +864,24 @@ export default function Dashboard() {
   const rawMonths = cashflow.data?.months ?? [];
   const incomeTrend = linearTrend(rawMonths.map((m) => m.income));
   const expenseTrend = linearTrend(rawMonths.map((m) => m.expenses));
-  const cashflowData = rawMonths.map((m, i) => ({
-    month: m.month.substring(5),
-    fullMonth: m.month,
-    Income: m.income,
-    Expenses: m.expenses,
-    Investments: m.investments,
-    Savings: m.savings,
-    "Offset Savings": m.offsetSavings ?? 0,
-    IncomeTrend: incomeTrend[i],
-    ExpensesTrend: expenseTrend[i],
-  }));
+  const investmentCategories = [...new Set(rawMonths.flatMap((m) => Object.keys(m.investmentBreakdown ?? {})))];
+  const INVEST_COLORS = ["#8b5cf6", "#a78bfa", "#c4b5fd", "#7c3aed", "#6d28d9"];
+
+  const cashflowData = rawMonths.map((m, i) => {
+    const invBreakdown = m.investmentBreakdown ?? {};
+    const invEntries = investmentCategories.reduce((acc, cat) => { acc[cat] = invBreakdown[cat] ?? 0; return acc; }, {} as Record<string, number>);
+    return {
+      month: m.month.substring(5),
+      fullMonth: m.month,
+      Income: m.income,
+      Expenses: m.expenses,
+      "Mortgage Goal": m.mortgageGoalOffset ?? 0,
+      "Free Cash": m.freeCash ?? 0,
+      IncomeTrend: incomeTrend[i],
+      ExpensesTrend: expenseTrend[i],
+      ...invEntries,
+    };
+  });
 
   const pieData = (categories.data?.categories ?? []).slice(0, 7).map((c, i) => ({
     name: c.category,
@@ -927,15 +1023,8 @@ export default function Dashboard() {
             label="Total Invested"
             value={formatCurrency(s?.totalInvested ?? 0)}
             positive={true}
-            sub={
-              <a
-                href="/transactions?tab=investments"
-                onClick={(e) => e.stopPropagation()}
-                className="text-xs text-muted-foreground hover:text-primary transition-colors"
-              >
-                {s?.investmentsFiltered ?? 0} investment txns →
-              </a>
-            }
+            onClick={() => openDrill("investments")}
+            hint="Click to see investments by category"
             change={showComparison && prevSummary.data ? pctChange(s?.totalInvested ?? 0, prevSummary.data.totalInvested) : undefined}
           />
           <MetricCard
@@ -1043,9 +1132,55 @@ export default function Dashboard() {
                     setDrill({ type: "expenses", startDate, endDate, label: d.fullMonth });
                   }}
                 />
-                <Bar dataKey="Investments" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Savings" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Offset Savings" fill="#06b6d4" radius={[2, 2, 0, 0]} />
+                {investmentCategories.map((cat, ci) => (
+                  <Bar
+                    key={cat}
+                    dataKey={cat}
+                    stackId="inv"
+                    fill={INVEST_COLORS[ci % INVEST_COLORS.length]}
+                    radius={ci === investmentCategories.length - 1 ? [2, 2, 0, 0] : [0, 0, 0, 0]}
+                    style={{ cursor: "pointer" }}
+                    onClick={(d: any) => {
+                      const { startDate, endDate } = getMonthDateRange(d.fullMonth);
+                      setDrill({ type: "investments", startDate, endDate, label: d.fullMonth, initialCategory: cat });
+                    }}
+                  />
+                ))}
+                <Bar
+                  dataKey="Mortgage Goal"
+                  stackId="sav"
+                  fill="#06b6d4"
+                  radius={[0, 0, 0, 0]}
+                  style={{ cursor: "pointer" }}
+                  onClick={(d: any) => {
+                    const { startDate, endDate } = getMonthDateRange(d.fullMonth);
+                    setDrill({ type: "offset", startDate, endDate, label: d.fullMonth });
+                  }}
+                />
+                <Bar
+                  dataKey="Free Cash"
+                  stackId="sav"
+                  fill="#3b82f6"
+                  radius={[2, 2, 0, 0]}
+                  style={{ cursor: "pointer" }}
+                  onClick={(d: any) => {
+                    const { startDate, endDate } = getMonthDateRange(d.fullMonth);
+                    const monthData = rawMonths.find((m) => m.month === d.fullMonth);
+                    setDrill({
+                      type: "free-cash",
+                      startDate,
+                      endDate,
+                      label: d.fullMonth,
+                      freeCashBreakdown: {
+                        income: monthData?.income ?? 0,
+                        expenses: monthData?.expenses ?? 0,
+                        investments: monthData?.investments ?? 0,
+                        mortgageGoalOffset: monthData?.mortgageGoalOffset ?? 0,
+                        freeCash: monthData?.freeCash ?? 0,
+                      },
+                    });
+                  }}
+                />
                 {rawMonths.length >= 3 && (
                   <>
                     <Line dataKey="IncomeTrend" stroke="#10b981" strokeWidth={2} dot={false} strokeDasharray="5 3" type="linear" legendType="none" />

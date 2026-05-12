@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { transactionsTable, netWorthAccountsTable } from "@workspace/db";
-import { eq, and, gte, lte, sql, ne } from "drizzle-orm";
+import { eq, and, gte, lte, sql, ne, inArray } from "drizzle-orm";
 import { GetDashboardSummaryQueryParams, GetCashflowQueryParams, GetSpendingByCategoryQueryParams } from "@workspace/api-zod";
 
 const router = Router();
@@ -140,23 +140,30 @@ router.get("/dashboard/cashflow", async (req, res) => {
       isInvestment: transactionsTable.isInvestment,
       transactionDate: transactionsTable.transactionDate,
       accountNumber: transactionsTable.accountNumber,
+      categoryName: transactionsTable.categoryName,
+      userCategory: transactionsTable.userCategory,
     }).from(transactionsTable)
       .where(and(...conditions));
 
-    const monthlyMap: Record<string, { income: number; expenses: number; investments: number; transfers: number; offsetSavings: number }> = {};
+    type MonthBucket = {
+      income: number; expenses: number; investments: number;
+      transfers: number; mortgageGoalOffset: number;
+      investmentBreakdown: Record<string, number>;
+    };
+    const monthlyMap: Record<string, MonthBucket> = {};
 
     for (const row of rows) {
       if (!row.transactionDate) continue;
       const monthKey = row.transactionDate.substring(0, 7);
       if (!monthlyMap[monthKey]) {
-        monthlyMap[monthKey] = { income: 0, expenses: 0, investments: 0, transfers: 0, offsetSavings: 0 };
+        monthlyMap[monthKey] = { income: 0, expenses: 0, investments: 0, transfers: 0, mortgageGoalOffset: 0, investmentBreakdown: {} };
       }
       const amount = parseFloat(row.amount);
       if (row.isTransfer) {
-        // Credits landing in a savings-type offset account are explicit mortgage-acceleration
-        // contributions. Track them separately so they appear as a named savings line item.
-        if (row.creditDebit === "credit" && savingsAccountNumbers.has(row.accountNumber ?? "")) {
-          monthlyMap[monthKey].offsetSavings += amount;
+        if (savingsAccountNumbers.has(row.accountNumber ?? "")) {
+          // Net flow: credits into the mortgage goal account add; debits (withdrawals) subtract.
+          const sign = row.creditDebit === "credit" ? 1 : -1;
+          monthlyMap[monthKey].mortgageGoalOffset += sign * amount;
         } else {
           monthlyMap[monthKey].transfers += amount;
         }
@@ -164,6 +171,8 @@ router.get("/dashboard/cashflow", async (req, res) => {
       }
       if (row.isInvestment && row.creditDebit === "debit") {
         monthlyMap[monthKey].investments += amount;
+        const cat = row.userCategory ?? row.categoryName ?? "Investments";
+        monthlyMap[monthKey].investmentBreakdown[cat] = (monthlyMap[monthKey].investmentBreakdown[cat] ?? 0) + amount;
         continue;
       }
       if (row.creditDebit === "credit") {
@@ -180,22 +189,25 @@ router.get("/dashboard/cashflow", async (req, res) => {
 
     const monthsData = sortedMonths.map((month) => {
       const data = monthlyMap[month];
+      const mortgageGoalOffset = data.mortgageGoalOffset;
+      const savings = data.income - data.expenses - data.investments;
+      const freeCash = savings - mortgageGoalOffset;
       return {
         month,
         income: data.income,
         expenses: data.expenses,
         investments: data.investments,
-        // savings = total residual after expenses and investments (includes offsetSavings).
-        // Subtract offsetSavings on the frontend if you want "free cash" vs "offset savings" split.
-        savings: data.income - data.expenses - data.investments,
+        savings,
         transfers: data.transfers,
-        offsetSavings: data.offsetSavings,
+        mortgageGoalOffset,
+        freeCash,
+        investmentBreakdown: data.investmentBreakdown,
       };
     });
 
     const avgIncome = monthsData.length > 0 ? monthsData.reduce((s, m) => s + m.income, 0) / monthsData.length : 0;
     const avgExpenses = monthsData.length > 0 ? monthsData.reduce((s, m) => s + m.expenses, 0) / monthsData.length : 0;
-    const avgSavings = avgIncome - avgExpenses;
+    const avgSavings = monthsData.length > 0 ? monthsData.reduce((s, m) => s + m.savings, 0) / monthsData.length : 0;
 
     res.json({
       months: monthsData,
@@ -320,20 +332,20 @@ router.get("/dashboard/accounts", async (req, res) => {
 
 router.get("/dashboard/category-drilldown", async (req, res) => {
   try {
-    const type = (req.query.type as string) === "income" ? "income" : "expenses";
+    const rawType = req.query.type as string;
+    const type = rawType === "income" ? "income" : rawType === "investments" ? "investments" : "expenses";
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;
 
-    const creditDebit = type === "income" ? "credit" : "debit";
+    const baseConditions = [eq(transactionsTable.included, true)];
+    if (startDate) baseConditions.push(gte(transactionsTable.transactionDate, startDate));
+    if (endDate) baseConditions.push(lte(transactionsTable.transactionDate, endDate));
 
-    const conditions = [
-      eq(transactionsTable.included, true),
-      eq(transactionsTable.creditDebit, creditDebit),
-      eq(transactionsTable.isTransfer, false),
-      eq(transactionsTable.isInvestment, false),
-    ];
-    if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
-    if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
+    const conditions = type === "investments"
+      ? [...baseConditions, eq(transactionsTable.isInvestment, true), eq(transactionsTable.creditDebit, "debit")]
+      : type === "income"
+      ? [...baseConditions, eq(transactionsTable.creditDebit, "credit"), eq(transactionsTable.isTransfer, false), eq(transactionsTable.isInvestment, false)]
+      : [...baseConditions, eq(transactionsTable.creditDebit, "debit"), eq(transactionsTable.isTransfer, false), eq(transactionsTable.isInvestment, false)];
 
     const rows = await db
       .select({
@@ -369,6 +381,56 @@ router.get("/dashboard/category-drilldown", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to get category drilldown");
     res.status(500).json({ error: "Failed to get category drilldown" });
+  }
+});
+
+router.get("/dashboard/offset-drilldown", async (req, res) => {
+  try {
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+
+    const savingsAccounts = await db
+      .select({ linkedAccountNumber: netWorthAccountsTable.linkedAccountNumber })
+      .from(netWorthAccountsTable)
+      .where(and(
+        eq(netWorthAccountsTable.type, "asset"),
+        eq(netWorthAccountsTable.category, "savings"),
+        eq(netWorthAccountsTable.isLinked, true),
+      ));
+    const savingsAccountNumbers = savingsAccounts
+      .map((a) => a.linkedAccountNumber)
+      .filter(Boolean) as string[];
+
+    if (!savingsAccountNumbers.length) return res.json({ transactions: [], netFlow: 0 });
+
+    const conditions = [
+      eq(transactionsTable.included, true),
+      inArray(transactionsTable.accountNumber, savingsAccountNumbers),
+    ];
+    if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
+    if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
+
+    const rows = await db.select({
+      id: transactionsTable.id,
+      transactionDate: transactionsTable.transactionDate,
+      description: transactionsTable.description,
+      creditDebit: transactionsTable.creditDebit,
+      amount: transactionsTable.amount,
+      accountNumber: transactionsTable.accountNumber,
+      isTransfer: transactionsTable.isTransfer,
+    }).from(transactionsTable)
+      .where(and(...conditions))
+      .orderBy(transactionsTable.transactionDate);
+
+    const netFlow = rows.reduce((acc, row) => {
+      const amount = parseFloat(row.amount);
+      return acc + (row.creditDebit === "credit" ? amount : -amount);
+    }, 0);
+
+    res.json({ transactions: rows, netFlow });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get offset drilldown");
+    res.status(500).json({ error: "Failed to get offset drilldown" });
   }
 });
 

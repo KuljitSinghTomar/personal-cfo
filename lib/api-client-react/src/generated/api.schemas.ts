@@ -107,7 +107,9 @@ export interface MonthlyData {
   investments: number;
   savings: number;
   transfers: number;
-  offsetSavings: number;
+  mortgageGoalOffset: number;
+  freeCash: number;
+  investmentBreakdown: Record<string, number>;
 }
 
 export interface CashflowResponse {

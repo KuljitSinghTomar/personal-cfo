@@ -801,9 +801,17 @@ components:
           type: number
         transfers:
           type: number
-        offsetSavings:
+        mortgageGoalOffset:
           type: number
-          description: Explicit contributions to savings-type offset accounts (e.g. mortgage acceleration offset). Already included in the savings residual — shown separately for visibility.
+          description: Net flow into savings-type offset accounts (credits minus withdrawals). Part of the savings total.
+        freeCash:
+          type: number
+          description: Residual after expenses, investments, and mortgage goal offset. Can be negative if offset commitments exceed available income.
+        investmentBreakdown:
+          type: object
+          additionalProperties:
+            type: number
+          description: Investment amounts by sub-category (e.g. Securities Trades, Super Contribution).
       required:
         - month
         - income
@@ -811,7 +819,9 @@ components:
         - investments
         - savings
         - transfers
-        - offsetSavings
+        - mortgageGoalOffset
+        - freeCash
+        - investmentBreakdown
 
     SpendingByCategoryResponse:
       type: object
