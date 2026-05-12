@@ -76,6 +76,11 @@ export async function redetectInvestments(log?: any): Promise<{ marked: number }
 // ── Transfer pair-matching engine ─────────────────────────────────────────
 
 export async function redetectTransfers(log?: any): Promise<{ matched: number; reset: number }> {
+  // ── Step 0: Broad reset ───────────────────────────────────────────────────────
+  // Clear ALL isTransfer flags before re-detecting. This ensures stale flags set
+  // during import (via transactionType) are wiped before category-based pairing.
+  await db.update(transactionsTable).set({ isTransfer: false }).where(eq(transactionsTable.isTransfer, true));
+
   // ── Step 1: Loan/mortgage account credits ────────────────────────────────────
   // When money hits a loan account as "transfer_incoming" the bank is recording
   // a repayment. Always exclude from income — no pair needed.
@@ -347,7 +352,7 @@ router.get("/transfers/grouped", async (req, res) => {
         if (days <= 3 && gap < bestGap) { bestMatch = credit; bestGap = gap; }
       }
 
-      if (bestMatch) {
+      if (bestMatch && debit.accountNumber !== bestMatch.accountNumber) {
         usedCreditIds.add(bestMatch.id);
         usedDebitIds.add(debit.id);
         const daysApart = Math.round(bestGap / (1000 * 60 * 60 * 24));
@@ -410,7 +415,6 @@ router.post("/transactions/import", async (req, res) => {
         const included = row["included"] !== "false";
         const userTagsRaw = row["user_tags"] ?? "";
         const userTags = userTagsRaw ? userTagsRaw.replace(/^"|"$/g, "").split(",").filter(Boolean) : [];
-        const isTransferType = row["transaction_type"] === "transfer_incoming" || row["transaction_type"] === "transfer_outgoing";
         const isTransferCategory = (row["category_name"] ?? "").toLowerCase().includes("transfer") ||
           (row["category_name"] ?? "").toLowerCase().includes("credit card payment");
         const merchantName = row["merchant_name"] || null;
@@ -443,7 +447,7 @@ router.post("/transactions/import", async (req, res) => {
           categoryName,
           userTags,
           notes: row["notes"] || null,
-          isTransfer: isTransferType || isTransferCategory,
+          isTransfer: isTransferCategory,
           isInvestment: csvIsInvestment,
           isRecurring: false,
           aiConfidenceScore: "0.85",
