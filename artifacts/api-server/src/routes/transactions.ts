@@ -429,20 +429,47 @@ router.post("/transactions/import", async (req, res) => {
         const merchantName = row["merchant_name"] || null;
         const description = row["description"] ?? "";
         const categoryName = row["category_name"] || null;
-        const csvCreditDebit = row["credit_debit"] === "credit" ? "credit" : "debit";
-        const csvIsInvestment = csvCreditDebit === "debit" && isInvestmentTransaction(categoryName, description);
+        const csvIsInvestment = creditDebit === "debit" && isInvestmentTransaction(categoryName, description);
 
         const existingRows = await db
-          .select({ id: transactionsTable.id, userCategory: transactionsTable.userCategory })
+          .select({
+            id: transactionsTable.id,
+            // Bank-provided fields (for change detection)
+            description: transactionsTable.description,
+            amount: transactionsTable.amount,
+            currency: transactionsTable.currency,
+            transactionDate: transactionsTable.transactionDate,
+            postedDate: transactionsTable.postedDate,
+            accountNumber: transactionsTable.accountNumber,
+            accountName: transactionsTable.accountName,
+            creditDebit: transactionsTable.creditDebit,
+            transactionType: transactionsTable.transactionType,
+            providerName: transactionsTable.providerName,
+            merchantName: transactionsTable.merchantName,
+            categoryName: transactionsTable.categoryName,
+            // App-managed fields (preserved on update, never overwritten from CSV)
+            userCategory: transactionsTable.userCategory,
+            userDescription: transactionsTable.userDescription,
+            userTags: transactionsTable.userTags,
+            notes: transactionsTable.notes,
+            included: transactionsTable.included,
+            budgetCategory: transactionsTable.budgetCategory,
+            isTransfer: transactionsTable.isTransfer,
+            isInvestment: transactionsTable.isInvestment,
+            isRecurring: transactionsTable.isRecurring,
+            aiConfidenceScore: transactionsTable.aiConfidenceScore,
+          })
           .from(transactionsTable)
           .where(eq(transactionsTable.transactionId, transactionId))
           .limit(1);
 
-        const txData = {
+        const incomingAmount = Math.abs(rawAmount).toFixed(2);
+
+        // Bank-provided fields only — used for both insert and the change-detection comparison.
+        const bankData = {
           transactionId,
           description,
-          userDescription: row["user_description"] || null,
-          amount: Math.abs(rawAmount).toFixed(2),
+          amount: incomingAmount,
           currency: row["currency"] ?? "AUD",
           transactionDate: row["transaction_date"] ?? "",
           postedDate: row["posted_date"] || null,
@@ -452,36 +479,71 @@ router.post("/transactions/import", async (req, res) => {
           transactionType: row["transaction_type"] ?? "",
           providerName: row["provider_name"] ?? "",
           merchantName,
-          budgetCategory: row["budget_category"] || null,
-          categoryName,
-          userTags,
-          notes: row["notes"] || null,
-          isTransfer: isTransferCategory,
-          isInvestment: csvIsInvestment,
-          isRecurring: false,
-          aiConfidenceScore: "0.85",
-          included,
         };
 
         const existingRow = existingRows[0];
         if (existingRow) {
-          // Apply rules to fix up categoryName when the bank re-assigns a different raw category
-          // on re-import (e.g. LN REPAY alternating between "Mortgage" and "Transfer Between Accounts").
-          // Preserve any existing userCategory override; if none, apply rules as userCategory.
+          // Apply rules upfront so we compare what we'd actually store, not the raw CSV category.
+          // This prevents false "changed" detections on transactions whose categoryName was
+          // already rule-applied in a prior import (e.g. "Transfer Between Accounts" → "Mortgage").
           const ruleCategory = applyRules(merchantName, description, categoryName);
           const effectiveCategoryName = ruleCategory ?? categoryName;
-          await db.update(transactionsTable)
-            .set({
-              ...txData,
-              categoryName: effectiveCategoryName,
-              userCategory: existingRow.userCategory ?? ruleCategory,
-              updatedAt: new Date(),
-            })
-            .where(eq(transactionsTable.transactionId, transactionId));
-          updated++;
+
+          const bankFieldsChanged =
+            existingRow.description !== description ||
+            parseFloat(existingRow.amount ?? "0").toFixed(2) !== incomingAmount ||
+            existingRow.currency !== (row["currency"] ?? "AUD") ||
+            existingRow.transactionDate !== (row["transaction_date"] ?? "") ||
+            (existingRow.postedDate ?? null) !== (row["posted_date"] || null) ||
+            existingRow.accountNumber !== (row["account_number"] ?? "") ||
+            existingRow.accountName !== (row["account_name"] ?? "") ||
+            existingRow.creditDebit !== creditDebit ||
+            existingRow.transactionType !== (row["transaction_type"] ?? "") ||
+            existingRow.providerName !== (row["provider_name"] ?? "") ||
+            (existingRow.merchantName ?? null) !== merchantName ||
+            (existingRow.categoryName ?? null) !== (effectiveCategoryName ?? null);
+
+          if (!bankFieldsChanged) {
+            skipped++;
+          } else {
+            await db.update(transactionsTable)
+              .set({
+                ...bankData,
+                categoryName: effectiveCategoryName,
+                // All app-managed fields preserved from the existing row
+                userCategory: existingRow.userCategory ?? ruleCategory,
+                userDescription: existingRow.userDescription,
+                userTags: existingRow.userTags,
+                notes: existingRow.notes,
+                included: existingRow.included,
+                budgetCategory: existingRow.budgetCategory,
+                isTransfer: existingRow.isTransfer,
+                isInvestment: existingRow.isInvestment,
+                isRecurring: existingRow.isRecurring,
+                aiConfidenceScore: existingRow.aiConfidenceScore,
+                updatedAt: new Date(),
+              })
+              .where(eq(transactionsTable.transactionId, transactionId));
+            updated++;
+          }
         } else {
+          // New transaction — seed app-managed fields from CSV if present, apply rules for category.
           const ruleCategory = applyRules(merchantName, description, categoryName);
-          await db.insert(transactionsTable).values({ id: randomUUID(), ...txData, userCategory: ruleCategory });
+          await db.insert(transactionsTable).values({
+            id: randomUUID(),
+            ...bankData,
+            categoryName: ruleCategory ?? categoryName,
+            userCategory: ruleCategory,
+            userDescription: row["user_description"] || null,
+            userTags,
+            notes: row["notes"] || null,
+            included,
+            budgetCategory: row["budget_category"] || null,
+            isTransfer: isTransferCategory,
+            isInvestment: csvIsInvestment,
+            isRecurring: false,
+            aiConfidenceScore: "0.85",
+          });
           imported++;
         }
       } catch { errors++; }
