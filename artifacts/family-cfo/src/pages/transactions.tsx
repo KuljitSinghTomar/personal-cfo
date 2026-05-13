@@ -915,9 +915,14 @@ export default function Transactions() {
                           <span className="text-xs text-muted-foreground/50 flex-shrink-0 font-normal">{pair.daysApart}d apart</span>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground/55 truncate mt-0.5">
-                        {(pair.outgoing.userDescription ?? pair.outgoing.description).substring(0, 38)} ↔ {(pair.incoming.userDescription ?? pair.incoming.description).substring(0, 38)}
-                      </p>
+                      <div className="mt-0.5 space-y-0.5">
+                        <p className="text-xs text-muted-foreground/55 truncate">
+                          <span className="text-muted-foreground/35">↑</span> {pair.outgoing.userDescription ?? pair.outgoing.description}
+                        </p>
+                        <p className="text-xs text-muted-foreground/55 truncate">
+                          <span className="text-muted-foreground/35">↓</span> {pair.incoming.userDescription ?? pair.incoming.description}
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">

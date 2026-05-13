@@ -296,7 +296,7 @@ function DrillDownSheet({
         startDate: drill.startDate,
         endDate: drill.endDate,
         isTransfer: false as const,
-        ...(drill.type === "investments" ? { isInvestment: true as const } : {}),
+        ...(drill.type === "investments" ? { isInvestment: true as const } : { isInvestment: false as const }),
       }
     : null;
 
@@ -422,7 +422,12 @@ function DrillDownSheet({
   const viewAllParams = new URLSearchParams();
   if (selectedCategory) viewAllParams.set("category", selectedCategory);
   viewAllParams.set("creditDebit", isIncome ? "credit" : "debit");
-  if (isInvestments) viewAllParams.set("isInvestment", "true");
+  if (isInvestments) {
+    viewAllParams.set("isInvestment", "true");
+  } else if (!isIncome) {
+    viewAllParams.set("isTransfer", "false");
+    viewAllParams.set("isInvestment", "false");
+  }
   if (drill.startDate) viewAllParams.set("startDate", drill.startDate);
   if (drill.endDate) viewAllParams.set("endDate", drill.endDate);
 

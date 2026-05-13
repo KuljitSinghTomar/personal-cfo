@@ -25,7 +25,7 @@ function matchesPattern(text: string, matchPattern: string): boolean {
 // ── Investment detection engine ────────────────────────────────────────────
 
 const INVESTMENT_CATEGORY_PATTERNS = [
-  "super", "invest", "shares", "brokerage", "managed fund", "etf",
+  "super", "invest", "shares", "brokerage", "managed fund", "etf", "securities",
 ];
 
 const INVESTMENT_DESCRIPTION_PATTERNS = [
@@ -53,6 +53,9 @@ export async function redetectInvestments(log?: any): Promise<{ marked: number }
   const catConditions = INVESTMENT_CATEGORY_PATTERNS.map((p) =>
     ilike(transactionsTable.categoryName, `%${p}%`)
   );
+  const userCatConditions = INVESTMENT_CATEGORY_PATTERNS.map((p) =>
+    ilike(transactionsTable.userCategory, `%${p}%`)
+  );
   const descConditions = INVESTMENT_DESCRIPTION_PATTERNS.map((p) =>
     ilike(transactionsTable.description, `%${p}%`)
   );
@@ -63,7 +66,7 @@ export async function redetectInvestments(log?: any): Promise<{ marked: number }
       and(
         eq(transactionsTable.creditDebit, "debit"),
         eq(transactionsTable.included, true),
-        or(...catConditions, ...descConditions),
+        or(...catConditions, ...userCatConditions, ...descConditions),
       )
     )
     .returning({ id: transactionsTable.id });
