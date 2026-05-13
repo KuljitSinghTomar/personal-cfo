@@ -139,10 +139,15 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
 
   if (candidates.length === 0) return { matched: 0, reset: 0 };
 
-  // Reset all candidates to false, then re-mark only confirmed pairs
   const candidateIds = candidates.map((c) => c.id);
-  await db.update(transactionsTable).set({ isTransfer: false }).where(inArray(transactionsTable.id, candidateIds));
 
+  // Mark ALL transfer-category candidates as transfers — including unmatched ones.
+  // If the counterpart is in an untracked account no pair will be found, but the
+  // transaction is still not an expense. Unmatched ones surface in the "Unpaired"
+  // section of the transfers tab so the user can review them.
+  await db.update(transactionsTable).set({ isTransfer: true }).where(inArray(transactionsTable.id, candidateIds));
+
+  // Pair-match for stats only (the grouped-transfers UI does its own in-memory matching)
   const debits = candidates.filter((c) => c.creditDebit === "debit");
   const credits = candidates.filter((c) => c.creditDebit === "credit");
   const creditsByAmount = new Map<string, typeof credits>();
@@ -167,10 +172,6 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
       usedCreditIds.add(credit.id);
       break;
     }
-  }
-
-  if (matchedIds.length > 0) {
-    await db.update(transactionsTable).set({ isTransfer: true }).where(inArray(transactionsTable.id, matchedIds));
   }
 
   log?.info({ candidates: candidateIds.length, matched: matchedIds.length }, "Transfer re-detection complete");
