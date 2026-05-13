@@ -131,7 +131,8 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
         sql`lower(${transactionsTable.accountName}) not like '%loan%'`,
         sql`lower(${transactionsTable.accountName}) not like '%mortgage%'`,
       )
-    );
+    )
+    .orderBy(transactionsTable.transactionDate, transactionsTable.id);
 
   if (candidates.length === 0) return { matched: 0, reset: 0 };
 
@@ -550,16 +551,17 @@ router.post("/transactions/import", async (req, res) => {
     }
 
     let transfersDetected = 0;
-    try {
-      const result = await redetectTransfers(req.log);
-      transfersDetected = result.matched;
-    } catch (e) {
-      req.log.warn({ err: e }, "Transfer re-detection failed (non-fatal)");
+    if (imported > 0 || updated > 0) {
+      try {
+        const result = await redetectTransfers(req.log);
+        transfersDetected = result.matched;
+      } catch (e) {
+        req.log.warn({ err: e }, "Transfer re-detection failed (non-fatal)");
+      }
+      redetectInvestments(req.log).catch((e) => req.log.warn({ err: e }, "Investment re-detection failed (non-fatal)"));
+      syncNetWorthFromTransactions(req.log).catch((e) => req.log.warn({ err: e }, "Net worth sync failed"));
+      autoGenerateBudgetGoals(req.log).catch((e) => req.log.warn({ err: e }, "Auto-generate budgets failed"));
     }
-
-    redetectInvestments(req.log).catch((e) => req.log.warn({ err: e }, "Investment re-detection failed (non-fatal)"));
-    syncNetWorthFromTransactions(req.log).catch((e) => req.log.warn({ err: e }, "Net worth sync failed"));
-    autoGenerateBudgetGoals(req.log).catch((e) => req.log.warn({ err: e }, "Auto-generate budgets failed"));
 
     res.json({
       imported, skipped, updated, errors,
