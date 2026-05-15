@@ -102,16 +102,42 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
       )
     );
 
-  // ── Step 2: Category-confirmed pair-matching ─────────────────────────────────
-  // Only include transactions where the CATEGORY explicitly says "transfer" or
-  // "credit card payment". We do NOT rely on transaction_type alone because
-  // payroll deposits (type=transfer_incoming, category=Salary/Regular Income)
-  // must never be matched as transfers — they are real external income.
-  // Loan accounts are excluded here (handled above in Step 1).
-  // userCategory takes precedence: if the user has overridden the category to
-  // something that is NOT a transfer (e.g. "Mortgage"), exclude from candidates
-  // even if the raw categoryName still says "Transfer Between Accounts".
-  const candidates = await db
+  // ── Step 2: Category-confirmed candidates ────────────────────────────────────
+  // Mark ALL transactions whose category says "transfer" or "credit card payment"
+  // as transfers — including unmatched ones where the counterpart is in an
+  // untracked external account. userCategory overrides raw categoryName.
+  const categoryConfirmed = await db
+    .select({ id: transactionsTable.id })
+    .from(transactionsTable)
+    .where(
+      and(
+        or(
+          ilike(transactionsTable.categoryName, "%transfer%"),
+          ilike(transactionsTable.categoryName, "%credit card payment%"),
+        ),
+        or(
+          sql`${transactionsTable.userCategory} IS NULL`,
+          ilike(transactionsTable.userCategory, "%transfer%"),
+          ilike(transactionsTable.userCategory, "%credit card payment%"),
+        ),
+        sql`lower(${transactionsTable.accountName}) not like '%loan%'`,
+        sql`lower(${transactionsTable.accountName}) not like '%mortgage%'`,
+      )
+    );
+
+  if (categoryConfirmed.length > 0) {
+    await db.update(transactionsTable).set({ isTransfer: true }).where(
+      inArray(transactionsTable.id, categoryConfirmed.map((c) => c.id))
+    );
+  }
+
+  // ── Step 3: Pure amount-based pair matching ───────────────────────────────────
+  // Find debit/credit pairs of the exact same amount within 3 days on different
+  // accounts. This catches transfers where the bank miscategorized one leg (e.g.
+  // an OSKO credit-card payment labelled "Securities Trades"). Only matches
+  // transactions NOT already flagged as transfers. Excludes income categories
+  // (salary/wages/payroll) to prevent false-positive matches against real income.
+  const unmatchedTx = await db
     .select({
       id: transactionsTable.id,
       amount: transactionsTable.amount,
@@ -122,45 +148,29 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
     .from(transactionsTable)
     .where(
       and(
-        or(
-          ilike(transactionsTable.categoryName, "%transfer%"),
-          ilike(transactionsTable.categoryName, "%credit card payment%"),
-        ),
-        // Exclude if userCategory overrides to a non-transfer category
-        or(
-          sql`${transactionsTable.userCategory} IS NULL`,
-          ilike(transactionsTable.userCategory, "%transfer%"),
-          ilike(transactionsTable.userCategory, "%credit card payment%"),
-        ),
-        sql`lower(${transactionsTable.accountName}) not like '%loan%'`,
-        sql`lower(${transactionsTable.accountName}) not like '%mortgage%'`,
+        eq(transactionsTable.included, true),
+        eq(transactionsTable.isTransfer, false),
+        sql`lower(coalesce(${transactionsTable.userCategory}, ${transactionsTable.categoryName}, '')) not like '%salary%'`,
+        sql`lower(coalesce(${transactionsTable.userCategory}, ${transactionsTable.categoryName}, '')) not like '%payroll%'`,
+        sql`lower(coalesce(${transactionsTable.userCategory}, ${transactionsTable.categoryName}, '')) not like '%wage%'`,
+        sql`lower(coalesce(${transactionsTable.userCategory}, ${transactionsTable.categoryName}, '')) not like '%regular income%'`,
       )
     )
     .orderBy(transactionsTable.transactionDate, transactionsTable.id);
 
-  if (candidates.length === 0) return { matched: 0, reset: 0 };
+  const unmatchedDebits = unmatchedTx.filter((t) => t.creditDebit === "debit");
+  const unmatchedCredits = unmatchedTx.filter((t) => t.creditDebit === "credit");
 
-  const candidateIds = candidates.map((c) => c.id);
-
-  // Mark ALL transfer-category candidates as transfers — including unmatched ones.
-  // If the counterpart is in an untracked account no pair will be found, but the
-  // transaction is still not an expense. Unmatched ones surface in the "Unpaired"
-  // section of the transfers tab so the user can review them.
-  await db.update(transactionsTable).set({ isTransfer: true }).where(inArray(transactionsTable.id, candidateIds));
-
-  // Pair-match for stats only (the grouped-transfers UI does its own in-memory matching)
-  const debits = candidates.filter((c) => c.creditDebit === "debit");
-  const credits = candidates.filter((c) => c.creditDebit === "credit");
-  const creditsByAmount = new Map<string, typeof credits>();
-  for (const c of credits) {
+  const creditsByAmount = new Map<string, typeof unmatchedCredits>();
+  for (const c of unmatchedCredits) {
     if (!creditsByAmount.has(c.amount)) creditsByAmount.set(c.amount, []);
     creditsByAmount.get(c.amount)!.push(c);
   }
 
-  const matchedIds: string[] = [];
+  const amountMatchedIds: string[] = [];
   const usedCreditIds = new Set<string>();
 
-  for (const debit of debits) {
+  for (const debit of unmatchedDebits) {
     const potentialCredits = creditsByAmount.get(debit.amount) ?? [];
     for (const credit of potentialCredits) {
       if (usedCreditIds.has(credit.id)) continue;
@@ -168,15 +178,25 @@ export async function redetectTransfers(log?: any): Promise<{ matched: number; r
       const daysDiff = Math.abs(
         (new Date(debit.transactionDate!).getTime() - new Date(credit.transactionDate!).getTime()) / (1000 * 60 * 60 * 24)
       );
-      if (daysDiff > 2) continue;
-      matchedIds.push(debit.id, credit.id);
+      if (daysDiff > 3) continue;
+      amountMatchedIds.push(debit.id, credit.id);
       usedCreditIds.add(credit.id);
       break;
     }
   }
 
-  log?.info({ candidates: candidateIds.length, matched: matchedIds.length }, "Transfer re-detection complete");
-  return { matched: matchedIds.length / 2, reset: candidateIds.length };
+  if (amountMatchedIds.length > 0) {
+    await db.update(transactionsTable).set({ isTransfer: true }).where(
+      inArray(transactionsTable.id, amountMatchedIds)
+    );
+  }
+
+  const totalMatched = categoryConfirmed.length + amountMatchedIds.length;
+  log?.info(
+    { categoryConfirmed: categoryConfirmed.length, amountMatched: amountMatchedIds.length / 2 },
+    "Transfer re-detection complete"
+  );
+  return { matched: amountMatchedIds.length / 2, reset: totalMatched };
 }
 
 // ── Description token extraction ──────────────────────────────────────────
