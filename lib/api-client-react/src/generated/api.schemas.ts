@@ -400,6 +400,8 @@ export type ListTransactionsParams = {
   isTransfer?: boolean;
   isInvestment?: boolean;
   isRecurring?: boolean;
+  minAmount?: number;
+  maxAmount?: number;
 };
 
 export type ListTransactionsCreditDebit =

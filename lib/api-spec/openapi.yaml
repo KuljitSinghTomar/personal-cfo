@@ -88,6 +88,14 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: minAmount
+          in: query
+          schema:
+            type: number
+        - name: maxAmount
+          in: query
+          schema:
+            type: number
       responses:
         "200":
           description: List of transactions

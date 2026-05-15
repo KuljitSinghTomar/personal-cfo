@@ -32,6 +32,8 @@ export const ListTransactionsQueryParams = zod.object({
   isTransfer: zod.coerce.boolean().optional(),
   isInvestment: zod.coerce.boolean().optional(),
   isRecurring: zod.coerce.boolean().optional(),
+  minAmount: zod.coerce.number().optional(),
+  maxAmount: zod.coerce.number().optional(),
 });
 
 export const ListTransactionsResponse = zod.object({

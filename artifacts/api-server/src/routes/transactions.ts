@@ -309,11 +309,13 @@ router.get("/transactions", async (req, res) => {
     if (rawQuery.isInvestment === "false") rawQuery.isInvestment = false;
     else if (rawQuery.isInvestment === "true") rawQuery.isInvestment = true;
     const query = ListTransactionsQueryParams.parse(rawQuery);
-    const { page, limit, startDate, endDate, category, accountName, search, creditDebit, isTransfer, isRecurring, isInvestment } = query;
+    const { page, limit, startDate, endDate, category, accountName, search, creditDebit, isTransfer, isRecurring, isInvestment, minAmount, maxAmount } = query;
 
     const conditions = [];
     if (startDate) conditions.push(gte(transactionsTable.transactionDate, startDate));
     if (endDate) conditions.push(lte(transactionsTable.transactionDate, endDate));
+    if (minAmount !== undefined) conditions.push(gte(transactionsTable.amount, minAmount.toFixed(2)));
+    if (maxAmount !== undefined) conditions.push(lte(transactionsTable.amount, maxAmount.toFixed(2)));
     if (category) conditions.push(or(ilike(transactionsTable.categoryName, `%${category}%`), ilike(transactionsTable.userCategory, `%${category}%`)));
     if (accountName) conditions.push(ilike(transactionsTable.accountName, `%${accountName}%`));
     if (creditDebit) conditions.push(eq(transactionsTable.creditDebit, creditDebit));

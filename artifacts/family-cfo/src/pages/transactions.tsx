@@ -10,7 +10,7 @@ import { useSearch } from "wouter";
 import {
   Search, Upload, RefreshCw, Repeat2, Clock, X,
   ChevronLeft, ChevronRight, Shuffle, Tag, Check, ChevronsUpDown,
-  AlertTriangle, Layers, Fingerprint, ArrowRight, TrendingUp, Info,
+  AlertTriangle, Layers, Fingerprint, ArrowRight, TrendingUp, Info, Calendar,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,9 @@ import {
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Tooltip, TooltipTrigger, TooltipContent,
+} from "@/components/ui/tooltip";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
@@ -463,6 +466,12 @@ export default function Transactions() {
   const [page, setPage] = useState(1);
   const [searchText, setSearchText] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [minAmountText, setMinAmountText] = useState("");
+  const [maxAmountText, setMaxAmountText] = useState("");
+  const [debouncedMinAmount, setDebouncedMinAmount] = useState<number | undefined>(undefined);
+  const [debouncedMaxAmount, setDebouncedMaxAmount] = useState<number | undefined>(undefined);
   const [category, setCategory] = useState(urlParams.get("category") ?? "All Categories");
   const [accountName, setAccountName] = useState(urlAccount);
   const [creditDebit, setCreditDebit] = useState<"all" | "credit" | "debit">("all");
@@ -505,6 +514,10 @@ export default function Transactions() {
     category: activeTab === "transactions" ? (category === "All Categories" ? undefined : category) : undefined,
     accountName: activeTab === "transactions" ? (accountName || undefined) : undefined,
     creditDebit: activeTab === "transactions" ? (creditDebit === "all" ? undefined : creditDebit) : undefined,
+    startDate: activeTab === "transactions" ? (dateFrom || undefined) : undefined,
+    endDate: activeTab === "transactions" ? (dateTo || undefined) : undefined,
+    minAmount: activeTab === "transactions" ? debouncedMinAmount : undefined,
+    maxAmount: activeTab === "transactions" ? debouncedMaxAmount : undefined,
     isTransfer: activeTab === "transfers" ? true : undefined,
     isInvestment: activeTab === "investments" ? true : undefined,
   };
@@ -543,6 +556,24 @@ export default function Transactions() {
     setSearchText(e.target.value);
     clearTimeout((window as any).__searchTimer);
     (window as any).__searchTimer = setTimeout(() => { setDebouncedSearch(e.target.value); setPage(1); }, 400);
+  };
+
+  const handleMinAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMinAmountText(e.target.value);
+    clearTimeout((window as any).__minAmountTimer);
+    (window as any).__minAmountTimer = setTimeout(() => {
+      setDebouncedMinAmount(e.target.value ? parseFloat(e.target.value) : undefined);
+      setPage(1);
+    }, 400);
+  };
+
+  const handleMaxAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setMaxAmountText(e.target.value);
+    clearTimeout((window as any).__maxAmountTimer);
+    (window as any).__maxAmountTimer = setTimeout(() => {
+      setDebouncedMaxAmount(e.target.value ? parseFloat(e.target.value) : undefined);
+      setPage(1);
+    }, 400);
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -715,31 +746,57 @@ export default function Transactions() {
 
       {/* Filters — only shown for main transactions tab */}
       {activeTab === "transactions" && (
-        <div className="flex flex-wrap gap-2 items-center">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input value={searchText} onChange={handleSearchChange} placeholder="Search transactions..." className="pl-8 h-8 text-sm" />
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input value={searchText} onChange={handleSearchChange} placeholder="Search transactions..." className="pl-8 h-8 text-sm" />
+            </div>
+            <div className="relative min-w-[140px]">
+              <Input value={accountName} onChange={(e) => { setAccountName(e.target.value); setPage(1); }} placeholder="Filter by account..." className="h-8 text-sm pr-6" />
+              {accountName && (
+                <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setAccountName("")}>
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+            <Select value={category} onValueChange={(v) => { setCategory(v); setPage(1); }}>
+              <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>{categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+            <Select value={creditDebit} onValueChange={(v) => { setCreditDebit(v as any); setPage(1); }}>
+              <SelectTrigger className="h-8 text-sm w-28"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="credit">Credits</SelectItem>
+                <SelectItem value="debit">Debits</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div className="relative min-w-[140px]">
-            <Input value={accountName} onChange={(e) => { setAccountName(e.target.value); setPage(1); }} placeholder="Filter by account..." className="h-8 text-sm pr-6" />
-            {accountName && (
-              <button className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" onClick={() => setAccountName("")}>
-                <X className="w-3 h-3" />
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative min-w-[140px]">
+              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} placeholder="From date..." className="pl-8 h-8 text-sm w-full rounded-md border border-input bg-background px-3 py-1 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
+            </div>
+            <div className="relative min-w-[140px]">
+              <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+              <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} placeholder="To date..." className="pl-8 h-8 text-sm w-full rounded-md border border-input bg-background px-3 py-1 text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
+            </div>
+            <div className="relative min-w-[110px]">
+              <Input type="number" value={minAmountText} onChange={handleMinAmountChange} placeholder="Min amount..." step="0.01" className="h-8 text-sm" />
+            </div>
+            <div className="relative min-w-[110px]">
+              <Input type="number" value={maxAmountText} onChange={handleMaxAmountChange} placeholder="Max amount..." step="0.01" className="h-8 text-sm" />
+            </div>
+            {(dateFrom || dateTo || minAmountText || maxAmountText) && (
+              <button
+                onClick={() => { setDateFrom(""); setDateTo(""); setMinAmountText(""); setMaxAmountText(""); setDebouncedMinAmount(undefined); setDebouncedMaxAmount(undefined); setPage(1); }}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+              >
+                <X className="w-3 h-3" /> Clear filters
               </button>
             )}
           </div>
-          <Select value={category} onValueChange={(v) => { setCategory(v); setPage(1); }}>
-            <SelectTrigger className="h-8 text-sm w-44"><SelectValue /></SelectTrigger>
-            <SelectContent>{categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={creditDebit} onValueChange={(v) => { setCreditDebit(v as any); setPage(1); }}>
-            <SelectTrigger className="h-8 text-sm w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="credit">Credits</SelectItem>
-              <SelectItem value="debit">Debits</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
       )}
 
@@ -782,20 +839,40 @@ export default function Transactions() {
                     (transactions.data?.transactions ?? []).map((tx) => (
                       <tr key={tx.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
-                        <td className="py-2.5 px-3 max-w-[200px]">
-                          <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
+                        <td className="py-2.5 px-3 max-w-[260px]">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <p className="font-medium text-foreground truncate cursor-default">{tx.userDescription ?? tx.description}</p>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs break-words">
+                              {tx.userDescription ?? tx.description}
+                            </TooltipContent>
+                          </Tooltip>
                           {tx.merchantName && tx.merchantName !== "Unknown" && (
-                            <p className="text-muted-foreground text-xs">{tx.merchantName}</p>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <p className="text-muted-foreground text-xs truncate cursor-default">{tx.merchantName}</p>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs break-words">
+                                {tx.merchantName}
+                              </TooltipContent>
+                            </Tooltip>
                           )}
                         </td>
                         <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">
-                          <button
-                            className="truncate max-w-[120px] text-left hover:text-primary transition-colors block"
-                            title={`Filter by ${tx.accountName}`}
-                            onClick={() => { setAccountName(tx.accountName); setPage(1); }}
-                          >
-                            {tx.accountName}
-                          </button>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                className="truncate max-w-[120px] text-left hover:text-primary transition-colors block cursor-default"
+                                onClick={() => { setAccountName(tx.accountName); setPage(1); }}
+                              >
+                                {tx.accountName}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              {`Filter by ${tx.accountName}`}
+                            </TooltipContent>
+                          </Tooltip>
                           <p className="text-muted-foreground/60">{tx.providerName}</p>
                         </td>
                         <td className="py-2.5 px-3">
@@ -908,20 +985,48 @@ export default function Transactions() {
                     <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">{pair.date}</span>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 text-sm font-medium">
-                        <span className="truncate max-w-[130px] text-muted-foreground" title={pair.outgoing.accountName}>{pair.outgoing.accountName}</span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="truncate max-w-[130px] text-muted-foreground cursor-default">{pair.outgoing.accountName}</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            {pair.outgoing.accountName}
+                          </TooltipContent>
+                        </Tooltip>
                         <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/40 flex-shrink-0" />
-                        <span className="truncate max-w-[130px]" title={pair.incoming.accountName}>{pair.incoming.accountName}</span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="truncate max-w-[130px] cursor-default">{pair.incoming.accountName}</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            {pair.incoming.accountName}
+                          </TooltipContent>
+                        </Tooltip>
                         {pair.daysApart > 0 && (
                           <span className="text-xs text-muted-foreground/50 flex-shrink-0 font-normal">{pair.daysApart}d apart</span>
                         )}
                       </div>
                       <div className="mt-0.5 space-y-0.5">
-                        <p className="text-xs text-muted-foreground/55 truncate">
-                          <span className="text-muted-foreground/35">↑</span> {pair.outgoing.userDescription ?? pair.outgoing.description}
-                        </p>
-                        <p className="text-xs text-muted-foreground/55 truncate">
-                          <span className="text-muted-foreground/35">↓</span> {pair.incoming.userDescription ?? pair.incoming.description}
-                        </p>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <p className="text-xs text-muted-foreground/55 truncate cursor-default">
+                              <span className="text-muted-foreground/35">↑</span> {pair.outgoing.userDescription ?? pair.outgoing.description}
+                            </p>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs break-words">
+                            {pair.outgoing.userDescription ?? pair.outgoing.description}
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <p className="text-xs text-muted-foreground/55 truncate cursor-default">
+                              <span className="text-muted-foreground/35">↓</span> {pair.incoming.userDescription ?? pair.incoming.description}
+                            </p>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs break-words">
+                            {pair.incoming.userDescription ?? pair.incoming.description}
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
                     </div>
                   </div>
@@ -955,8 +1060,22 @@ export default function Transactions() {
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">{tx.transactionDate}</span>
                       <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{tx.userDescription ?? tx.description}</p>
-                        <p className="text-xs text-muted-foreground/70 truncate">{tx.accountName} · {tx.transactionType}</p>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <p className="text-sm font-medium truncate cursor-default">{tx.userDescription ?? tx.description}</p>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="max-w-xs break-words">
+                            {tx.userDescription ?? tx.description}
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <p className="text-xs text-muted-foreground/70 truncate cursor-default">{tx.accountName} · {tx.transactionType}</p>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">
+                            {tx.accountName} · {tx.transactionType}
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
@@ -1027,13 +1146,34 @@ export default function Transactions() {
                       <tr key={tx.id} className="border-b border-border hover:bg-muted/30 transition-colors">
                         <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">{tx.transactionDate}</td>
                         <td className="py-2.5 px-3 max-w-[220px]">
-                          <p className="font-medium text-foreground truncate">{tx.userDescription ?? tx.description}</p>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <p className="font-medium text-foreground truncate cursor-default">{tx.userDescription ?? tx.description}</p>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-xs break-words">
+                              {tx.userDescription ?? tx.description}
+                            </TooltipContent>
+                          </Tooltip>
                           {tx.merchantName && tx.merchantName !== "Unknown" && (
-                            <p className="text-muted-foreground text-xs">{tx.merchantName}</p>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <p className="text-muted-foreground text-xs truncate cursor-default">{tx.merchantName}</p>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs break-words">
+                                {tx.merchantName}
+                              </TooltipContent>
+                            </Tooltip>
                           )}
                         </td>
                         <td className="py-2.5 px-3 text-muted-foreground whitespace-nowrap">
-                          <p className="truncate max-w-[120px]">{tx.accountName}</p>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <p className="truncate max-w-[120px] cursor-default">{tx.accountName}</p>
+                            </TooltipTrigger>
+                            <TooltipContent side="top">
+                              {tx.accountName}
+                            </TooltipContent>
+                          </Tooltip>
                           <p className="text-muted-foreground/60">{tx.providerName}</p>
                         </td>
                         <td className="py-2.5 px-3">
