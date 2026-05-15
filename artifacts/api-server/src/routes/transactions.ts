@@ -66,6 +66,7 @@ export async function redetectInvestments(log?: any): Promise<{ marked: number }
       and(
         eq(transactionsTable.creditDebit, "debit"),
         eq(transactionsTable.included, true),
+        eq(transactionsTable.isTransfer, false),
         or(...catConditions, ...userCatConditions, ...descConditions),
       )
     )

@@ -1046,21 +1046,38 @@ export default function Transactions() {
                           -{formatCurrency(tx.amount)}
                         </td>
                         <td className="py-2.5 px-3 text-right">
-                          <button
-                            onClick={() => updateMutation.mutate(
-                              { id: tx.id, data: { isInvestment: false } },
-                              {
-                                onSuccess: () => {
-                                  queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
-                                  toast({ title: "Moved to transactions", description: "Reclassified as a regular transaction" });
-                                },
-                              }
-                            )}
-                            className="text-xs px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1 ml-auto"
-                            title="Not an investment"
-                          >
-                            <X className="w-3 h-3" /> Not investment
-                          </button>
+                          <div className="flex gap-1 justify-end">
+                            <button
+                              onClick={() => updateMutation.mutate(
+                                { id: tx.id, data: { isInvestment: false, isTransfer: true } },
+                                {
+                                  onSuccess: () => {
+                                    queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+                                    toast({ title: "Moved to transfers", description: "Reclassified as a transfer" });
+                                  },
+                                }
+                              )}
+                              className="text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors whitespace-nowrap flex items-center gap-1"
+                              title="Mark as transfer"
+                            >
+                              <Repeat2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => updateMutation.mutate(
+                                { id: tx.id, data: { isInvestment: false } },
+                                {
+                                  onSuccess: () => {
+                                    queryClient.invalidateQueries({ queryKey: getListTransactionsQueryKey() });
+                                    toast({ title: "Moved to transactions", description: "Reclassified as a regular transaction" });
+                                  },
+                                }
+                              )}
+                              className="text-xs px-2 py-1 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors whitespace-nowrap flex items-center gap-1"
+                              title="Not an investment"
+                            >
+                              <X className="w-3 h-3" /> Not investment
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
